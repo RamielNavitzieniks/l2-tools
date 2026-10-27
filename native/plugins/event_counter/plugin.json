@@ -1,0 +1,9 @@
+{
+  "id": "event_counter",
+  "name": "Contador de eventos",
+  "version": "0.1.0",
+  "api_version": 1,
+  "description": "Exemplo local e nao invasivo: conta eventos do motor por tipo e informa o total a cada parada.",
+  "entry": "plugin.py",
+  "permissions": ["journal:read"]
+}
