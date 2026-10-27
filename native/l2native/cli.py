@@ -66,6 +66,27 @@ def _build_adapter(args: argparse.Namespace) -> GameAdapter:
     return create_adapter(SourceKind.LIVE)
 
 
+def _windows(args: argparse.Namespace) -> int:
+    """Lista janelas para o operador criar regras a partir de evidencia propria. Nada e gravado."""
+    from .discovery import DiscoveryConfig, DiscoveryStatus, SessionDiscovery
+    try:
+        config = DiscoveryConfig.load(args.config) if args.config else DiscoveryConfig()
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"ERRO na configuracao: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    result = SessionDiscovery.for_platform(config).scan(include_all=args.all)
+    if result.status is not DiscoveryStatus.OK:
+        print(result.message, file=sys.stderr)
+        return EXIT_UNAVAILABLE
+    for s in result.sessions:
+        w = s.window
+        rule = ",".join(s.rules) or "-"
+        print(f"{w.process or '?':<24} pid={w.pid:<6} hwnd={w.hwnd:<10} classe={w.class_name!r:<28} "
+              f"regra={rule:<12} titulo={w.title!r}" + (f"  [{w.process_note}]" if w.process_note else ""))
+    print(result.message)
+    return EXIT_OK
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="l2native", description="Motor Python nativo do L2-Tools (offline)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -85,10 +106,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     run.add_argument("--journal", type=Path, help="gravar registro completo em JSONL")
     run.add_argument("--quiet", action="store_true")
     sub.add_parser("gui", help="abrir a interface grafica (requer PySide6)")
+    win = sub.add_parser("windows", help="listar janelas locais (somente leitura, Windows)")
+    win.add_argument("--all", action="store_true", help="incluir janelas que nao casam com nenhuma regra")
+    win.add_argument("--config", type=Path, help="discovery.json com as regras (padrao: nenhuma regra)")
     args = parser.parse_args(argv)
     if args.command == "gui":
         from .gui.app import main as gui_main
         return gui_main([])
+    if args.command == "windows":
+        return _windows(args)
 
     try:
         script = load_script(args.script)

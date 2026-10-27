@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QComboBox, QDockWidget, QFileDialog, QInputDialog
 from ..actions import ActionKind
 from ..adapters.factory import SourceKind
 from ..adapters.replay import state_from_dict
+from ..discovery import DiscoveryConfig, SessionDiscovery, WindowSource
 from ..engine import EngineConfig
 from ..journal import Record
 from ..model import GameState, Position
@@ -26,6 +27,7 @@ from .editor import ScriptEditor
 from .mapview import LAYERS, MapView
 from .panels import (CapabilityPanel, CharacterPanel, EntityCatalogPanel, EntityTable, EventLog, InfoPanel,
                      ObservationPanel, PluginPanel, RuleDecisionPanel, SessionBridge)
+from .sessions import SessionsPanel
 
 NATIVE_DIR = Path(__file__).resolve().parents[2]
 EXAMPLES = (
@@ -57,7 +59,8 @@ Confirm = Callable[[str, str], bool]
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config_path: Optional[Path] = None, confirm: Optional[Confirm] = None) -> None:
+    def __init__(self, config_path: Optional[Path] = None, confirm: Optional[Confirm] = None,
+                 window_source: Optional[WindowSource] = None, sessions_kwargs: Optional[dict] = None) -> None:
         super().__init__()
         self.setWindowTitle("L2-Tools Native")
         self.resize(1400, 860)
@@ -108,6 +111,15 @@ class MainWindow(QMainWindow):
         self.observation = ObservationPanel()
         self.plugins = PluginManager(self.cfg_dir / "plugins", notify=self._plugin_event)
         self.plugin_panel = PluginPanel(self.plugins, self.confirm, self._choose_plugin_folder)
+        discovery_path = self.cfg_dir / "discovery.json"
+        try:
+            discovery_cfg = DiscoveryConfig.load(discovery_path)
+        except (OSError, ValueError, KeyError):
+            discovery_cfg = DiscoveryConfig()
+        self.discovery = (SessionDiscovery(window_source, discovery_cfg) if window_source is not None
+                          else SessionDiscovery.for_platform(discovery_cfg))
+        self.sessions = SessionsPanel(self.discovery, discovery_path, lambda: self.profile.name,
+                                      notify=self._plugin_event, **(sessions_kwargs or {}))
         self.docks: dict[str, QDockWidget] = {}
         L, R, B = (Qt.DockWidgetArea.LeftDockWidgetArea, Qt.DockWidgetArea.RightDockWidgetArea,
                    Qt.DockWidgetArea.BottomDockWidgetArea)
@@ -117,6 +129,7 @@ class MainWindow(QMainWindow):
                 ("npcs", "NPCs", self.npcs, R), ("drops", "Drops", self.drops, R),
                 ("capabilities", "Capacidades do adaptador", self.capabilities, R),
                 ("observation", "Observacao minima", self.observation, R),
+                ("sessions", "Sessoes locais descobertas", self.sessions, B),
                 ("events", "Eventos", self.events, B), ("decisions", "Decisoes de regras (sem execucao)", self.decisions, B),
                 ("catalog", "Catalogo de entidades", self.catalog, B)):
             dock = QDockWidget(title, self)
@@ -127,6 +140,7 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self.docks["players"], self.docks["npcs"])
         self.tabifyDockWidget(self.docks["npcs"], self.docks["drops"])
         self.tabifyDockWidget(self.docks["capabilities"], self.docks["observation"])
+        self.tabifyDockWidget(self.docks["events"], self.docks["sessions"])
         self.tabifyDockWidget(self.docks["events"], self.docks["decisions"])
         self.tabifyDockWidget(self.docks["decisions"], self.docks["catalog"])
         self.docks["players"].raise_()
@@ -151,6 +165,7 @@ class MainWindow(QMainWindow):
         self._restore()
         self._apply_profile_to_views()
         self._refresh_controls()
+        self.sessions.refresh()   # somente leitura: lista janelas, nao executa nada
         if self.profile_migrated:
             self.statusBar().showMessage("Perfil migrado ao carregar: " + "; ".join(self.profile_migrated), 15000)
 
@@ -269,7 +284,7 @@ class MainWindow(QMainWindow):
             self.source_combo.blockSignals(False)
         self.source_button.setEnabled(kind is not SourceKind.LIVE)
         if kind is SourceKind.LIVE:
-            self.source_label.setText(" LiveAdapter nao implementado ")
+            self.source_label.setText(" LiveAdapter nao implementado (janelas locais: aba Sessoes locais descobertas) ")
         else:
             self.source_label.setText(f" {self.source_path.name if self.source_path else '(nenhum arquivo)'} ")
         self._refresh_controls()

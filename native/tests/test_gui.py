@@ -404,5 +404,77 @@ class Registro021PoliciesGuiTest(GuiTestCase):
         w.map.grab()
 
 
+class LiveIdentSessionsGuiTest(GuiTestCase):
+    """LIVE-IDENT-001: janelas candidatas, vinculo manual e estados separados."""
+
+    def make(self, windows, ask_binding=None, ask_rule=None):
+        from l2native.discovery import StaticWindowSource
+        self.win.close()
+        self.source = StaticWindowSource(windows)
+        win = self.MainWindow(config_path=self.cfg, confirm=self._confirm, window_source=self.source,
+                              sessions_kwargs={"ask_binding": ask_binding, "ask_rule": ask_rule})
+        win.show()
+        self.win = win
+        return win
+
+    def test_rule_from_observed_window_bind_persist_and_close(self):
+        from l2native.discovery import IDENTITY_UNOBSERVED, CandidateRule, LocalIdentity, WindowInfo
+        client = WindowInfo(1001, 40, "Cliente A", "ClasseCliente", "cliente.exe")
+        other = WindowInfo(2001, 50, "notas.txt", "Notepad", "notepad.exe")
+        w = self.make([client, other], ask_binding=lambda known, prof: LocalIdentity("Seguidora", prof),
+                      ask_rule=lambda win: CandidateRule.from_window(win, "cliente", "vi na minha tela"))
+        p = w.sessions
+        self.assertEqual(p.table.rowCount(), 0)
+        self.assertIn("Nenhuma regra", p.message.text())
+        self.assertIn("nao prova personagem logado", p.findChildren(type(p.message))[-1].text())
+        p.show_all.setChecked(True)
+        self.assertEqual(p.table.rowCount(), 2)
+        row = [r for r in range(2) if p.table.item(r, 0).text() == "cliente.exe"][0]
+        p.select_row(row)
+        p.bind_dialog()                                                     # sem regra: recusado
+        self.assertIn("so janelas candidatas", p.message.text())
+        p.rule_dialog()
+        p.show_all.setChecked(False)
+        self.assertEqual(p.table.rowCount(), 1)
+        self.assertEqual(p.table.item(0, 4).text(), "localizada (regra: cliente)")
+        p.select_row(0)
+        p.bind_dialog()
+        self.assertIn("Seguidora / perfil padrao", p.table.item(0, 5).text())
+        self.assertEqual(p.table.item(0, 6).text(), IDENTITY_UNOBSERVED)
+        self.assertIn("LiveAdapter nao implementado", p.table.item(0, 7).text())
+        self.assertIsNone(w.session)                                        # nada executou
+        saved = (self.cfg / "discovery.json").read_text(encoding="utf-8")
+        self.assertIn("cliente.exe", saved)
+        self.assertIn("Seguidora", saved)
+        self.assertNotIn("1001", saved)                                     # HWND/PID nao persistem
+        self.source.windows.remove(client)                                  # cliente fechado
+        p.refresh()
+        self.assertEqual(p.table.rowCount(), 0)
+        self.assertIn("Nenhuma janela candidata", p.message.text())
+        self.assertIn("session_closed", [r[2] for r in w.events.model.rows])
+        self.source.windows.append(client)
+        again = self.make([client])                                         # reinicio: regra volta, vinculo nao
+        self.assertEqual(again.sessions.table.rowCount(), 1)
+        self.assertEqual(again.sessions.table.item(0, 5).text(), "nao associado")
+        self.assertEqual([i.label for i in again.discovery.config.identities], ["Seguidora"])
+        again.sessions.select_row(0)
+        again.sessions.unbind_selected()
+        again.sessions.remove_rule()
+        self.assertEqual(again.discovery.config.rules, [])
+
+    def test_auto_refresh_and_live_source_hint(self):
+        from l2native.discovery import CandidateRule, DiscoveryConfig, WindowInfo
+        self.cfg.mkdir(parents=True, exist_ok=True)
+        DiscoveryConfig([CandidateRule("c", process="cliente.exe")]).save(self.cfg / "discovery.json")
+        w = self.make([])
+        w.sessions.timer.setInterval(20)
+        w.sessions.auto.setChecked(True)
+        self.source.windows.append(WindowInfo(7, 8, "Cliente", "X", "cliente.exe"))
+        self.assertTrue(self.pump(lambda: w.sessions.table.rowCount() == 1, timeout=3))
+        w.sessions.auto.setChecked(False)
+        w.set_source(SourceKind.LIVE, None)
+        self.assertIn("Sessoes locais", w.source_label.text())
+
+
 if __name__ == "__main__":
     unittest.main()

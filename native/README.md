@@ -1,4 +1,4 @@
-# L2-Tools Native (experimentos 020, 021, 023 e 024)
+# L2-Tools Native (experimentos 020, 021, 023, 024 e 025)
 
 Motor **independente** de automação para Lineage II, com scripts escritos diretamente em Python. Não depende do Adrenaline nem do interpretador Pascal.
 
@@ -45,6 +45,7 @@ Para ver funcionando sem o jogo: escolha **Arquivo → Exemplos** e depois **▶
 | Configurações → Perfil e políticas | Árvore de seções do inventário UX-001: Geral, Cura própria (Relaxar, Personagem morreu), Buff próprio, Cura-buff do grupo, Configurações do grupo, Ataque, Busca de alvo (Filtro), Zona de combate, Rota e Drop (Filtro), mais o **Catálogo de habilidades** (fonte única dos IDs, casados pelo nome da regra). Usa um editor de regras reutilizável com condições tipadas e colunas "ID (catálogo)" e "Agora" (verdadeira, falsa ou desconhecida). Também importa e exporta o perfil e mostra as alterações. Perfis `v1` são migrados ao carregar. |
 | Inferior, outras abas (exp. 023) | **Decisões de regras (sem execução)**: o que o `RuleEngine` escolheria agora, por seção ("seria usada (sem execução)", aguardando atraso, em intervalo, sem ID confirmado, desconhecida). **Catálogo de entidades**: jogadores e NPCs já vistos na sessão (só em memória). |
 | Direita, aba **Observação mínima** (exp. 023) | Prontidão da fonte em relação ao contrato de `../docs/contratos/observacao-minima.md`: atendido, não atendido ou dados insuficientes, com o que o adaptador declara observar. |
+| Inferior, aba **Sessões locais descobertas** (exp. 025) | Janelas do Windows que casam com regras criadas pelo operador, somente leitura. Mostra quatro estados separados: janela localizada, perfil associado manualmente, identidade observada (sempre desconhecida por enquanto) e telemetria real (indisponível). Fica separada dos personagens identificados; localizar uma janela não prova personagem logado. Também em `python -m l2native windows --all`. |
 | Menu **Rota** (exp. 023) | Nova, abrir, salvar como, **Editar rota** (cada clique no mapa adiciona um nó ligado ao anterior), desfazer o último nó, menor caminho entre nós. Visualizar → **Camadas do mapa** liga e desliga grade, trilha, entidades, zona, rota e caminho. |
 
 Regras da interface:
@@ -120,7 +121,7 @@ cd native
 python -m unittest discover -s tests -t . -v
 ```
 
-São 127 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt` e `requirements-gui.txt`. A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
+São 137 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt` e `requirements-gui.txt`. A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
 
 ## Arquitetura
 
@@ -150,6 +151,7 @@ Adapter -->|  GameState -> script decide -> intenções  -> parâmetros -> só s
 | `profile.py` | Seções tipadas (UX-001), perfil por personagem versionado (`l2tools-profile/2`, migração da v1), catálogo de habilidades, importação e exportação sem credenciais, e comparação de alterações. |
 | `catalog.py` | Catálogo de entidades vistas na sessão, separado do `GameState` do ciclo. |
 | `routes.py` | `RouteGraph` (`l2tools-route/1`, `provenance` obrigatória) e menor caminho. |
+| `discovery.py` | Descoberta de janelas somente leitura (Win32 via ctypes), regras do operador, vínculo manual e identidades locais (exp. 025). |
 | `policies.py` | `PolicyRunner`: executa as seções do perfil como intenções (exp. 024); só o Simulado tem backend. |
 | `observation.py` | Conjunto mínimo de observações e `ObservationMonitor` (cobertura, proveniência, erros e latência). |
 | `plugins.py` | `PluginManager`: manifesto, API versionada, permissões e ciclo de vida com confirmação. |
@@ -247,7 +249,7 @@ Só `completed` e `dispatched` contam como sucesso.
 
 **Pendentes (não declarar funcionais):**
 
-- qualquer leitura de estado do cliente Live: posição, HP/MP, NPCs, jogadores, inventário, quests;
+- qualquer leitura de estado do cliente Live: posição, HP/MP, NPCs, jogadores, inventário, quests. Só a **janela** do cliente é localizada (exp. 025); a identidade do personagem não é observada;
 - qualquer execução no jogo: movimento, alvo, ataque, skill, teleporte;
 - detector visual com um modelo real do cliente Kain;
 - captura de janela no Windows, implementada mas não executada;
