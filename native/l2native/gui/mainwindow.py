@@ -119,7 +119,8 @@ class MainWindow(QMainWindow):
         self.discovery = (SessionDiscovery(window_source, discovery_cfg) if window_source is not None
                           else SessionDiscovery.for_platform(discovery_cfg))
         self.sessions = SessionsPanel(self.discovery, discovery_path, lambda: self.profile.name,
-                                      notify=self._plugin_event, **(sessions_kwargs or {}))
+                                      notify=self._plugin_event,
+                                      **{"confirm": self.confirm, **(sessions_kwargs or {})})
         self.docks: dict[str, QDockWidget] = {}
         L, R, B = (Qt.DockWidgetArea.LeftDockWidgetArea, Qt.DockWidgetArea.RightDockWidgetArea,
                    Qt.DockWidgetArea.BottomDockWidgetArea)
@@ -628,6 +629,7 @@ class MainWindow(QMainWindow):
         if self.session and not self.session.finished:
             self.session.stop()
             self.session.join(2.0)
+        self.sessions.shutdown()
         for pid in list(self.plugins.plugins):
             self.plugins.disable(pid)
         self.save_layout()

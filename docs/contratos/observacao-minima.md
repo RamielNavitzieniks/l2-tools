@@ -51,6 +51,8 @@ O motor registra a declaração em `engine_start.observes` e a latência em cada
 - **VisualAdapter:** só observa a janela de missão e não atende nenhum requisito de campo.
 - **LiveAdapter:** não observa nada.
 
+- **Identidade visual (exp. 028):** o nome da personagem lido por OCR **não é campo do `GameState`** e não conta para nenhum requisito. Ele fica na sessão descoberta (`DiscoveredSession.reading`), com fonte `visual:ocr`, confiança, instante e região. É uma fonte parcial de identidade, não de estado do jogo.
+
 Conclusão: hoje **nenhuma fonte cumpre o contrato**. Isso é coerente com a decisão de não conectar um adaptador real.
 
 ## Fora do escopo

@@ -468,7 +468,7 @@ class LiveIdentSessionsGuiTest(GuiTestCase):
         p.bind_dialog()
         self.assertIn("Seguidora / perfil padrao", p.table.item(0, 5).text())
         self.assertEqual(p.table.item(0, 6).text(), IDENTITY_UNOBSERVED)
-        self.assertIn("LiveAdapter nao implementado", p.table.item(0, 7).text())
+        self.assertIn("LiveAdapter nao implementado", p.table.item(0, 9).text())
         self.assertIsNone(w.session)                                        # nada executou
         saved = (self.cfg / "discovery.json").read_text(encoding="utf-8")
         self.assertIn("cliente.exe", saved)
@@ -501,6 +501,193 @@ class LiveIdentSessionsGuiTest(GuiTestCase):
         w.sessions.auto.setChecked(False)
         w.set_source(SourceKind.LIVE, None)
         self.assertIn("Sessoes locais", w.source_label.text())
+
+
+
+class IdentityGuiTest(GuiTestCase):
+    """Experimento 028: identificacao visual no painel de sessoes (OCR e frames substituiveis)."""
+
+    def setUp(self):
+        super().setUp()
+        from .test_identity import np
+        if np is None:
+            self.skipTest("numpy/OpenCV ausentes")
+
+    def make(self, windows, *, region=True, confirm=None, probe_options=None, ocr_factory=None, ask_region=None):
+        from l2native.discovery import CandidateRule, DiscoveryConfig, StaticWindowSource
+        from l2native.ocr import ScriptedOcr
+        from l2native.vision.frames import StaticFrameSource
+        from .test_identity import CLIENT, ROI, render_client
+        self.win.close()
+        self.cfg.mkdir(parents=True, exist_ok=True)
+        rule = CandidateRule("cliente", process="L2.bin", evidence="teste")
+        DiscoveryConfig([rule], regions={"cliente": ROI} if region else {}).save(self.cfg / "discovery.json")
+        self.source = StaticWindowSource(windows)
+        self.answer = [("Seratonina", 0.95)]
+        self.grabbed = []
+
+        def frames(w):
+            self.grabbed.append(w.hwnd)
+            return StaticFrameSource([render_client("x")] * 5, client_size=CLIENT)
+        kwargs = {"ocr_factory": ocr_factory or (lambda: ScriptedOcr([self.answer])),
+                  "frame_source_factory": frames,
+                  "probe_options": {"samples": 2, "interval_s": 0.0, **(probe_options or {})},
+                  "ask_region": ask_region}
+        if confirm is not None:
+            kwargs["confirm"] = confirm
+        win = self.MainWindow(config_path=self.cfg, confirm=self._confirm, window_source=self.source,
+                              sessions_kwargs=kwargs)
+        win.show()
+        self.win = win
+        self.addCleanup(win.sessions.shutdown)
+        return win.sessions
+
+    def windows(self):
+        from l2native.discovery import WindowInfo
+        a = WindowInfo(1001, 40, "Lineage II", "L2UnrealWWindowsViewportWindow", "L2.bin", started_at=500.0)
+        b = WindowInfo(1002, 41, "Lineage II", "L2UnrealWWindowsViewportWindow", "L2.bin", started_at=510.0)
+        return a, b
+
+    def identify(self, p, row):
+        p.select_row(row)
+        p.buttons["identify"].click()
+        self.assertTrue(self.pump(lambda: p.job is None, timeout=5), p.message.text())
+
+    def test_button_reads_and_result_lands_on_the_right_row(self):
+        from l2native.discovery import LocalIdentity
+        a, b = self.windows()
+        p = self.make([a, b])
+        self.assertEqual(p.table.rowCount(), 2)
+        self.assertIn("ainda nao identificada", p.table.item(0, p.COL_IDENTITY).text())
+        p.bind(p.rows[0], LocalIdentity("Seratonina"))
+        p.bind(p.rows[1], LocalIdentity("Velina"))
+        row_b = p.row_of(self.win.discovery.sessions[b.key].session_id)
+        self.answer = [("Velina", 0.95)]
+        self.identify(p, row_b)
+        self.assertEqual(self.grabbed, [b.hwnd])                       # so a janela selecionada
+        self.assertIn("compativel", p.table.item(row_b, p.COL_IDENTITY).text())
+        self.assertEqual(p.table.item(row_b, p.COL_CONFIDENCE).text(), "0.95")
+        row_a = 1 - row_b
+        self.assertIn("ainda nao identificada", p.table.item(row_a, p.COL_IDENTITY).text())
+        self.answer = [("OutraPersonagem", 0.95)]
+        self.identify(p, row_a)
+        self.assertIn("DIVERGENTE", p.table.item(row_a, p.COL_IDENTITY).text())
+        self.assertIn("DIFERENTE do perfil", p.message.text())
+        self.assertFalse(self.win.discovery.action_gate(a.key)[0])
+        self.assertIsNone(self.win.session)                             # nenhum script iniciou
+        self.assertIn("LiveAdapter nao implementado", p.table.item(row_a, 9).text())
+        events = [(r[2], r[3]) for r in self.win.events.model.rows if r[2] == "identity_observed"]
+        self.assertEqual(len(events), 2)
+        self.assertFalse(any("OutraPersonagem" in d or "Velina" in d for _, d in events))   # sem o texto lido
+        p.select_row(row_a)
+        p.buttons["clear"].click()
+        self.assertIn("ainda nao identificada", p.table.item(row_a, p.COL_IDENTITY).text())
+
+    def test_worker_keeps_gui_responsive_and_cancel_works(self):
+        import time as _time
+        from PySide6.QtCore import QTimer
+        a, _ = self.windows()
+        p = self.make([a], probe_options={"samples": 3, "interval_s": 30.0})
+        ticks = []
+        timer = QTimer()
+        timer.timeout.connect(lambda: ticks.append(1))
+        timer.start(10)
+        self.addCleanup(timer.stop)
+        p.select_row(0)
+        started = _time.monotonic()
+        self.assertTrue(p.identify_selected())
+        self.assertLess(_time.monotonic() - started, 0.5)               # nao esperou a leitura
+        self.assertFalse(p.buttons["identify"].isEnabled())
+        self.assertEqual(p.table.item(0, p.COL_IDENTITY).text(), "identificando…")
+        self.assertTrue(self.pump(lambda: len(ticks) >= 5, timeout=3))   # a GUI segue processando eventos
+        self.assertIsNotNone(p.job)                                      # ainda esperando a 2a amostra
+        cancelled_at = _time.monotonic()
+        p.buttons["cancel"].click()
+        self.assertTrue(self.pump(lambda: p.job is None, timeout=3))
+        self.assertLess(_time.monotonic() - cancelled_at, 2.0)
+        self.assertIn("CANCELADA", p.table.item(0, p.COL_IDENTITY).text())
+        self.assertTrue(p.buttons["identify"].isEnabled())
+
+    def test_ocr_failure_and_missing_region_show_reason(self):
+        from l2native.ocr import OcrUnavailable
+        a, _ = self.windows()
+
+        def missing():
+            raise OcrUnavailable("TESSERACT_AUSENTE: programa tesseract nao encontrado")
+        p = self.make([a], ocr_factory=missing)
+        self.identify(p, 0)
+        self.assertIn("TESSERACT_AUSENTE", p.message.text())
+        self.assertIn("indisponivel: TESSERACT_AUSENTE", p.table.item(0, p.COL_IDENTITY).text())
+        p = self.make([a], region=False)
+        self.identify(p, 0)
+        self.assertIn("REGIAO_NAO_CONFIGURADA", p.table.item(0, p.COL_IDENTITY).text())
+
+    def test_window_change_discards_pending_result(self):
+        import threading
+        from l2native.discovery import WindowInfo
+        from l2native.ocr import ScriptedOcr
+        a, _ = self.windows()
+        gate = threading.Event()
+
+        class Slow(ScriptedOcr):
+            def recognize(self, image):
+                gate.wait(5)
+                return super().recognize(image)
+        p = self.make([a], ocr_factory=lambda: Slow([[("Seratonina", 0.95)]]))
+        p.select_row(0)
+        p.identify_selected()
+        self.source.windows[0] = WindowInfo(1001, 40, "Lineage II", "L2UnrealWWindowsViewportWindow", "L2.bin",
+                                            started_at=900.0)             # cliente reaberto: mesmo HWND/PID
+        p.refresh()
+        gate.set()
+        self.assertTrue(self.pump(lambda: p.job is None, timeout=5))
+        self.assertIn("Resultado descartado", p.message.text())
+        self.assertIn("ainda nao identificada", p.table.item(0, p.COL_IDENTITY).text())
+
+    def test_region_configuration_and_dialog(self):
+        from PySide6.QtCore import QRect
+        from l2native.gui.sessions import RegionDialog
+        from l2native.vision.frames import Frame, RegionOfInterest
+        from .test_identity import CLIENT, render_client
+        a, _ = self.windows()
+        asked = []
+
+        def ask(frame):
+            asked.append(frame.client_size)
+            return RegionOfInterest(0.1, 0.1, 0.2, 0.05, frame.client_size)
+        p = self.make([a], region=False, ask_region=ask)
+        p.select_row(0)
+        p.buttons["region"].click()
+        self.assertEqual(asked, [CLIENT])
+        saved = (self.cfg / "discovery.json").read_text(encoding="utf-8")
+        self.assertIn("identity_regions", saved)
+        self.assertNotIn("1001", saved)
+        self.assertIn("Regiao do nome salva", p.message.text())
+        dlg = RegionDialog(Frame(render_client("x"), CLIENT, 0.0))
+        self.assertIsNone(dlg.region())
+        dlg.set_selection(QRect(0, 0, dlg.view.width() // 4, dlg.view.height() // 10))
+        roi = dlg.region()
+        self.assertEqual((round(roi.w, 2), round(roi.h, 2), roi.reference_size), (0.25, 0.1, CLIENT))
+        dlg.set_selection(QRect(0, 0, 2, 2))
+        self.assertIsNone(dlg.region())                                  # pequena demais
+
+    def test_suggested_rule_needs_confirmation(self):
+        from l2native.discovery import WindowInfo
+        client = WindowInfo(3001, 70, "Lineage II", "L2UnrealWWindowsViewportWindow", "L2.bin")
+        answers = []
+        p = self.make([client], confirm=lambda title, text: answers.append(text) or False)
+        self.win.discovery.config.rules.clear()
+        p.refresh()
+        self.assertEqual(p.table.rowCount(), 0)
+        self.assertIn("regra sugerida", p.message.text())
+        p.buttons["suggested"].click()
+        self.assertIn("E13", answers[0])
+        self.assertEqual(self.win.discovery.config.rules, [])
+        p.confirm = lambda title, text: True
+        p.buttons["suggested"].click()
+        rule = self.win.discovery.config.rules[0]
+        self.assertIn("confirmada pelo operador", rule.origin)
+        self.assertEqual(p.table.rowCount(), 1)
 
 
 if __name__ == "__main__":

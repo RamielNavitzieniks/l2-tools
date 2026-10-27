@@ -3,7 +3,11 @@
 - `WindowClientCapture`: area cliente de UMA janela indicada explicitamente
   pelo operador (HWND), opcionalmente recortada por fracoes da janela.
   Somente Windows; exige a janela em primeiro plano (como no experimento 018),
-  para nunca capturar outra aplicacao.
+  para nunca capturar outra aplicacao. `grab_frame(regiao)` (exp. 028) captura
+  so a regiao pedida e antes confere: janela existe, nao esta minimizada,
+  pertence ao PID esperado e a regiao nao esta encoberta por outra janela.
+  Nao ha alternativa silenciosa (area de trabalho, outra janela): falha vira
+  `CaptureUnavailable` com o motivo.
 - `SequenceCapture`: frames em memoria ou PNGs locais, para execucao offline e testes.
 """
 from __future__ import annotations
@@ -61,7 +65,8 @@ class SequenceCapture:
 
 
 class WindowClientCapture:
-    def __init__(self, hwnd: int, region: Optional[Region] = None, require_foreground: bool = True) -> None:
+    def __init__(self, hwnd: int, region: Optional[Region] = None, require_foreground: bool = True,
+                 expected_pid: Optional[int] = None) -> None:
         if sys.platform != "win32":
             raise CaptureUnavailable("PLATAFORMA_NAO_SUPORTADA: captura de janela exige Windows")
         if not hwnd:
@@ -74,6 +79,7 @@ class WindowClientCapture:
         self._hwnd = hwnd
         self._region = region
         self._require_foreground = require_foreground
+        self._expected_pid = expected_pid
         self._mss = mss.mss()
 
     def _client_rect(self) -> tuple[int, int, int, int]:
@@ -87,7 +93,16 @@ class WindowClientCapture:
         user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
         hwnd = wintypes.HWND(self._hwnd)
         if not user32.IsWindow(hwnd):
-            raise CaptureUnavailable("JANELA_INVALIDA")
+            raise CaptureUnavailable("JANELA_INVALIDA: a janela foi fechada")
+        if self._expected_pid is not None:
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value != self._expected_pid:
+                raise CaptureUnavailable("JANELA_REUTILIZADA: o HWND agora pertence a outro processo")
+        if user32.IsIconic(hwnd):
+            raise CaptureUnavailable("JANELA_MINIMIZADA")
+        if not user32.IsWindowVisible(hwnd):
+            raise CaptureUnavailable("JANELA_OCULTA")
         if self._require_foreground and user32.GetForegroundWindow() != hwnd.value:
             raise CaptureUnavailable("JOGO_SEM_FOCO")
         rect, origin = wintypes.RECT(), wintypes.POINT(0, 0)
@@ -108,6 +123,40 @@ class WindowClientCapture:
             width, height = max(1, int(fw * width)), max(1, int(fh * height))
         shot = self._mss.grab({"left": left, "top": top, "width": width, "height": height})
         return np.asarray(shot)[:, :, :3].copy()
+
+    def _region_visible(self, left: int, top: int, width: int, height: int) -> bool:
+        """Centro e cantos da regiao pertencem a esta janela (nada a encobre)."""
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        user32.WindowFromPoint.restype = wintypes.HWND
+        user32.WindowFromPoint.argtypes = [wintypes.POINT]
+        user32.GetAncestor.restype = wintypes.HWND
+        user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+        GA_ROOT = 2
+        points = [(left + width // 2, top + height // 2), (left + 1, top + 1), (left + width - 2, top + 1),
+                  (left + 1, top + height - 2), (left + width - 2, top + height - 2)]
+        for x, y in points:
+            hit = user32.WindowFromPoint(wintypes.POINT(x, y))
+            if not hit or user32.GetAncestor(hit, GA_ROOT) != self._hwnd:
+                return False
+        return True
+
+    def grab_frame(self, region=None):
+        """Frame da area cliente inteira ou so de `region` (RegionOfInterest)."""
+        import time
+
+        import numpy as np
+
+        from .frames import Frame
+        left, top, width, height = self._client_rect()
+        x, y, w, h = (0, 0, width, height) if region is None else region.pixels((width, height))
+        if not self._region_visible(left + x, top + y, w, h):
+            raise CaptureUnavailable("REGIAO_ENCOBERTA: outra janela cobre a regiao (nada foi capturado)")
+        shot = self._mss.grab({"left": left + x, "top": top + y, "width": w, "height": h})
+        return Frame(np.asarray(shot)[:, :, :3].copy(), (width, height), time.time(), region,
+                     f"janela:{self._hwnd}")
 
     def close(self) -> None:
         self._mss.close()

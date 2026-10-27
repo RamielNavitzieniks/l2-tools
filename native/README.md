@@ -1,4 +1,4 @@
-# L2-Tools Native (experimentos 020, 021, 023, 024, 025 e 027)
+# L2-Tools Native (experimentos 020, 021, 023, 024, 025, 027 e 028)
 
 Motor **independente** de automação para Lineage II, com scripts escritos diretamente em Python. Não depende do Adrenaline nem do interpretador Pascal.
 
@@ -22,7 +22,15 @@ Para a interface gráfica:
 python -m pip install -r requirements-gui.txt   # PySide6-Essentials
 ```
 
-Também pode ser instalado como pacote, com `pip install -e .[gui,vision,capture]`. Isso cria os comandos `l2native` (CLI) e `l2native-gui`; este último abre a interface sem console no Windows.
+Opcional, para **identificar a personagem pelo nome na tela** (exp. 028), com OCR local:
+
+```powershell
+python -m pip install -r requirements-ocr.txt   # pytesseract; + programa Tesseract OCR 5 com o idioma "eng"
+```
+
+O programa Tesseract é instalado à parte, explicitamente (no Windows, o instalador da UB Mannheim, com `tesseract.exe` no `PATH`). Nada é baixado automaticamente e nenhuma imagem sai da máquina. Sem ele, a GUI mostra "indisponível: TESSERACT_AUSENTE".
+
+Também pode ser instalado como pacote, com `pip install -e .[gui,vision,capture,ocr]`. Isso cria os comandos `l2native` (CLI) e `l2native-gui`; este último abre a interface sem console no Windows.
 
 ## Interface gráfica (principal)
 
@@ -126,6 +134,24 @@ python -m l2native run --script scripts/quest_watch.py --adapter visual --templa
 python -m l2native run --script scripts/quest_watch.py --adapter visual --template assets/quest_box.png --hwnd 123456 --interval 1
 ```
 
+### Identificação visual da personagem (exp. 028)
+
+Na aba **Sessões locais descobertas**:
+
+1. selecione a janela candidata;
+2. use **Configurar região do nome…**: o programa captura **uma** imagem dessa janela, mostra-a sem salvar, e você marca onde aparece o nome da **sua** personagem;
+3. use **Identificar personagem**.
+
+A leitura roda fora da thread da interface, em 3 amostras, e pode ser cancelada. A coluna "Identidade observada" mostra uma destas situações:
+
+- **compatível**;
+- **DIVERGENTE**: bloqueia ações que dependam da identidade;
+- **observada sem associação**;
+- **desconhecida**, com o motivo;
+- **indisponível**, com o motivo.
+
+A identidade observada não muda a associação manual, não conecta ao jogo e não inicia script. Detalhes em `../docs/experimentos/l2tools-identidade-visual-028.md`.
+
 O modelo `quest_box.png` precisa ser recortado **localmente** do seu cliente, na mesma escala de interface (veja `scripts/assets/README.md` da PR #12). Use `--scale 1.25` (repetível) para aceitar outras escalas. O repositório não traz nenhum modelo real. Os frames ficam só em memória e nada é gravado.
 
 ## Testes
@@ -135,7 +161,7 @@ cd native
 python -m unittest discover -s tests -t . -v
 ```
 
-São 160 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt` e `requirements-gui.txt`. A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
+São 191 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt`, `requirements-gui.txt` e `requirements-ocr.txt` (com o programa Tesseract; sem ele, os testes de OCR real são pulados com o motivo). A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
 
 ## Arquitetura
 
@@ -159,7 +185,7 @@ Adapter -->|  GameState -> script decide -> intenções  -> parâmetros -> só s
 | `journal.py` | Registro estruturado, em memória e opcionalmente em JSONL. |
 | `geometry.py` | Fórmulas portadas dos experimentos 015–017. |
 | `adapters/` | `ReplayAdapter` (formato `l2tools-replay/1`, `replay_meta`, `summarize`), `MockAdapter` (com combate simulado opcional em `simcombat.py`), `VisualAdapter` e `LiveAdapter` (não implementado). |
-| `vision/` | `TemplateDetector` (OpenCV) e as capturas `SequenceCapture` / `WindowClientCapture`. |
+| `vision/` | `TemplateDetector` (OpenCV), as capturas `SequenceCapture` / `WindowClientCapture` (só a região pedida, com verificação de janela minimizada, encoberta ou reutilizada) e `frames.py` (`Frame`, `RegionOfInterest`, `VisualObserver`, reutilizáveis para HP/MP). |
 | `session.py` | Motor numa thread de trabalho, com estados (ocioso, executando, pausado, parando, parado, falhou) e eventos para a GUI. |
 | `rules.py` | `Condition` e `Rule` tipadas, com avaliação em três valores, `FilterRule` e `RuleEngine` (prioridade, atraso, intervalo; só decide, não executa). |
 | `profile.py` | Seções tipadas (UX-001), perfil por personagem versionado (`l2tools-profile/2`, migração da v1), catálogo de habilidades, importação e exportação sem credenciais, e comparação de alterações. |
@@ -167,6 +193,8 @@ Adapter -->|  GameState -> script decide -> intenções  -> parâmetros -> só s
 | `routes.py` | `RouteGraph` (`l2tools-route/1`, `provenance` obrigatória) e menor caminho. |
 | `discovery.py` | Descoberta de janelas somente leitura (Win32 via ctypes), regras do operador, vínculo manual e identidades locais (exp. 025). |
 | `policies.py` | `PolicyRunner`: executa as seções do perfil como intenções (exp. 024); só o Simulado tem backend. |
+| `identity.py` | `VisualIdentityProbe` (leitura do nome em várias amostras), `IdentityReading`, `IdentityMatcher` e `IdentityObservation` (compatível / divergente / sem associação / desconhecida / indisponível) (exp. 028). |
+| `ocr.py` | `OcrBackend`, `TesseractOcr` local e opcional, normalização Unicode conservadora e `NameRules` (exp. 028). |
 | `observation.py` | Conjunto mínimo de observações e `ObservationMonitor` (cobertura, proveniência, erros e latência). |
 | `plugins.py` | `PluginManager`: manifesto, API versionada, permissões e ciclo de vida com confirmação. |
 | `mapping.py` | Transformação mundo ↔ tela do mapa XY (zoom ancorado, enquadramento, grade). |
@@ -264,10 +292,10 @@ Só `completed` e `dispatched` contam como sucesso.
 
 **Pendentes (não declarar funcionais):**
 
-- qualquer leitura de estado do cliente Live: posição, HP/MP, NPCs, jogadores, inventário, quests. Só a **janela** do cliente é localizada (exp. 025); a identidade do personagem não é observada;
+- qualquer leitura de estado do cliente Live: posição, HP/MP, NPCs, jogadores, inventário, quests. A **janela** do cliente é localizada (exp. 025), e o **nome** da personagem pode ser lido por OCR numa região configurada (exp. 028). A leitura foi comprovada só com imagens sintéticas, não com o cliente real;
 - qualquer execução no jogo: movimento, alvo, ataque, skill, teleporte;
 - detector visual com um modelo real do cliente Kain;
-- captura de janela no Windows, implementada mas não executada;
+- captura de janela no Windows: testada na CI só com uma janela tkinter criada pelo teste, não com o cliente;
 - combate, áreas ocupadas, recuperação e coordenação de grupo;
 - execução das políticas **fora do Simulado**, e de Drop e Cura-buff do grupo mesmo no Simulado;
 - qualquer fonte que cumpra o contrato de observação mínima: nenhuma cumpre hoje;

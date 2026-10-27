@@ -1,0 +1,6 @@
+# Opcional (experimento 028): leitura local do nome da personagem.
+# Alem deste pacote, instale o programa Tesseract OCR 5 com o idioma "eng":
+#   Windows: instalador do Tesseract (UB Mannheim) e, se preciso, o caminho em PATH
+#   Linux:   tesseract-ocr (apt) ou tesseract + tesseract-langpack-eng (dnf)
+# Nada e baixado automaticamente e nenhuma imagem sai da maquina.
+pytesseract>=0.3.10

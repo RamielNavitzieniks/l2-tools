@@ -12,6 +12,7 @@ dependencies = []  # o nucleo usa somente a biblioteca padrao
 [project.optional-dependencies]
 vision = ["numpy>=1.24", "opencv-python-headless>=4.8"]
 capture = ["mss>=9"]  # captura de janela no Windows
+ocr = ["pytesseract>=0.3.10"]  # + programa Tesseract OCR 5 instalado no sistema (exp. 028)
 gui = ["PySide6-Essentials>=6.6"]
 
 [project.scripts]
