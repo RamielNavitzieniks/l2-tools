@@ -1,0 +1,2 @@
+# Interface grafica desktop (PySide6 / Qt for Python).
+PySide6-Essentials>=6.6

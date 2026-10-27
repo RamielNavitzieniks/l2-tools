@@ -1,8 +1,8 @@
-# L2-Tools Native (experimento 020)
+# L2-Tools Native (experimentos 020 e 021)
 
 Motor **independente** de automação para Lineage II, com scripts escritos diretamente em Python. Não depende do Adrenaline nem do interpretador Pascal.
 
-> **Estado:** primeira base executável, **somente offline**. O motor roda sobre replays JSONL, sobre um mundo simulado e, opcionalmente, sobre observação visual da janela de missão. **Não há integração com o cliente Lineage II Live.** O `LiveAdapter` existe apenas para declarar que essa integração não está implementada. Não há cliques, injeção, leitura de memória nem pacotes.
+> **Estado:** primeira base executável com **interface gráfica desktop** (exp. 021), **somente offline**. O motor roda sobre replays JSONL, sobre um mundo simulado e, opcionalmente, sobre observação visual da janela de missão. **Não há integração com o cliente Lineage II Live.** O `LiveAdapter` existe apenas para declarar que essa integração não está implementada. Não há cliques, injeção, leitura de memória nem pacotes.
 
 Evolui o protótipo `prototype_native/` (experimento 019, PR #13), que fica preservado sem alterações como registro histórico, e integra o detector visual do experimento 018 (PR #12).
 
@@ -16,7 +16,51 @@ cd native
 python -m pip install -r requirements-vision.txt
 ```
 
-Também pode ser instalado como pacote, com `pip install -e .[vision,capture]`, o que cria o comando `l2native`.
+Para a interface gráfica:
+
+```powershell
+python -m pip install -r requirements-gui.txt   # PySide6-Essentials
+```
+
+Também pode ser instalado como pacote, com `pip install -e .[gui,vision,capture]`. Isso cria os comandos `l2native` (CLI) e `l2native-gui`; este último abre a interface sem console no Windows.
+
+## Interface gráfica (principal)
+
+```powershell
+python -m l2native.gui          # ou: l2native-gui, ou: python -m l2native gui
+```
+
+No Windows, um duplo clique em `L2ToolsNative.pyw` abre a interface sem console.
+
+Para ver funcionando sem o jogo: escolha **Arquivo → Exemplos** e depois **▶ Iniciar** (F5). Carregar um exemplo só abre o script e a fonte de dados; nada executa sem o clique.
+
+| Área | Conteúdo |
+| --- | --- |
+| Barra superior | Fonte (**Replay**, **Simulado** ou **Desconectado**; "Desconectado" é o Live, não implementado), Iniciar, Pausar, Retomar, Parar e **Intervenção manual concluída** (habilitada só em pausa de missão). |
+| Centro, aba **Mapa** | Plano XY esquemático: trajetória, personagem, outras personagens, NPCs, destino pedido e zona de combate. Roda do mouse dá zoom; arrastar move; um clique escolhe um ponto; o menu de contexto define o centro da zona. Sem geodata e sem mapa raster. |
+| Centro, aba **Script** | Editor `.py` com numeração de linhas, realce de sintaxe e marcação de alterações não salvas. Abrir, salvar, salvar como e executar. A linha do erro fica destacada e o estado de execução é mostrado. |
+| Esquerda | **Sessão/Personagem**: nível, HP, MP, EXP, XYZ, alvo, combate e janela de missão, com origem e confiança, ou "desconhecido". **Plugins**. |
+| Direita | **Alvo**, **Jogadores**, **NPCs** e **Drops** (a lista vazia observada é diferente da lista desconhecida) e **Capacidades do adaptador** (Simulação / Disponível / Não suportada / Desconhecida). |
+| Inferior | **Eventos**: hora, ciclo, evento e detalhe, com filtros por categoria e por texto. |
+| Configurações → Perfil e políticas | Árvore de seções do inventário UX-001: Geral, Cura própria (Relaxar, Personagem morreu), Buff próprio, Cura-buff do grupo, Configurações do grupo, Ataque, Busca de alvo (Filtro), Zona de combate e Drop (Filtro). Usa um editor de regras reutilizável com condições tipadas e coluna "Agora" (verdadeira, falsa ou desconhecida). Também importa e exporta o perfil e mostra as alterações. |
+
+Regras da interface:
+
+- O motor roda numa thread de trabalho e a interface recebe os eventos por sinais Qt.
+- Os controles chamam o **mesmo Core** do CLI.
+- A pausa do operador congela o replay, sem consumir linhas.
+- Layout, último script e última fonte são salvos em `%APPDATA%\l2tools\` (ou `~/.config/l2tools/`) e reabertos **sem executar**.
+- O perfil (`profile.json`) nunca aceita campos de credencial.
+- Cada página de configuração mostra se existe backend. Hoje, quase tudo aparece como **Não suportada**, e é verdade: configurar não torna a função executável.
+
+### Plugins
+
+Plugins são diferentes de scripts: um script é a estratégia executada pelo motor; um plugin estende o aplicativo por hooks.
+
+- **Contrato (API 1):** uma pasta com `plugin.json` (`id`, `name`, `version`, `api_version`, `entry`, `permissions`) e um módulo com `activate(api)`, mais `deactivate()` e `on_record(record)` opcionais.
+- **Permissões:** a única permissão existente é `journal:read`, que dá leitura dos eventos. Nenhuma permissão dá acesso ao jogo, e manifestos com permissões desconhecidas aparecem como **incompatíveis**.
+- **Confirmação:** instalar (copiar para a pasta gerenciada), ativar e remover pedem confirmação explícita. Nada é ativado ao abrir o programa e nada é baixado.
+- **Exemplo:** `plugins/event_counter/` conta os eventos e registra um resumo ao final.
 
 ## Execução imediata, sem Lineage II
 
@@ -67,7 +111,7 @@ cd native
 python -m unittest discover -s tests -t . -v
 ```
 
-São 60 testes. Sem `numpy`/`opencv`, os testes de visão são **pulados**, com a mensagem informando o motivo; instale `requirements-vision.txt` para rodar a suíte completa. Os testes não usam rede, tempo real nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
+São 94 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt` e `requirements-gui.txt`. A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
 
 ## Arquitetura
 
@@ -92,6 +136,12 @@ Adapter -->|  GameState -> script decide -> intenções  -> parâmetros -> só s
 | `geometry.py` | Fórmulas portadas dos experimentos 015–017. |
 | `adapters/` | `ReplayAdapter`, `MockAdapter`, `VisualAdapter` e `LiveAdapter` (não implementado). |
 | `vision/` | `TemplateDetector` (OpenCV) e as capturas `SequenceCapture` / `WindowClientCapture`. |
+| `session.py` | Motor numa thread de trabalho, com estados (ocioso, executando, pausado, parando, parado, falhou) e eventos para a GUI. |
+| `rules.py` | `Condition` e `Rule` tipadas, com avaliação em três valores, e `FilterRule`. |
+| `profile.py` | Seções tipadas (UX-001), perfil por personagem, importação e exportação sem credenciais, e comparação de alterações. |
+| `plugins.py` | `PluginManager`: manifesto, API versionada, permissões e ciclo de vida com confirmação. |
+| `mapping.py` | Transformação mundo ↔ tela do mapa XY (zoom ancorado, enquadramento, grade). |
+| `gui/` | PySide6: `MainWindow`, `MapView`, `ScriptEditor`, painéis e `ConfigDialog`. |
 
 ### Garantias do motor
 
@@ -162,6 +212,10 @@ Só `completed` e `dispatched` contam como sucesso.
 
 **Funcionais e testadas offline:**
 
+- interface gráfica, com fontes Replay e Simulado;
+- editor de scripts integrado à interface;
+- perfis, regras e filtros (apenas configuração);
+- gerenciador de plugins, com plugin de exemplo;
 - motor completo;
 - carregamento e validação de scripts;
 - replay;
@@ -179,7 +233,10 @@ Só `completed` e `dispatched` contam como sucesso.
 - qualquer execução no jogo: movimento, alvo, ataque, skill, teleporte;
 - detector visual com um modelo real do cliente Kain;
 - captura de janela no Windows, implementada mas não executada;
-- combate, áreas ocupadas, recuperação e coordenação de grupo.
+- combate, áreas ocupadas, recuperação e coordenação de grupo;
+- execução das políticas configuradas (cura, buff, ataque, busca de alvo, drop): o editor salva, mas nenhum motor as executa;
+- GUI aberta em Windows real por uma pessoa: a CI só testa offscreen;
+- depuração passo a passo, breakpoints e várias abas de arquivo no editor.
 
 ## Limitações conhecidas
 
