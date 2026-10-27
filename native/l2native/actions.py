@@ -133,3 +133,25 @@ def validate_params(kind: ActionKind, params: Mapping[str, Any]) -> list[str]:
     elif kind is ActionKind.STOP:
         checks = [_text(params, "reason")]
     return [c for c in checks if c]
+
+
+class CapabilityStatus(str, Enum):
+    """Como a GUI rotula cada acao frente ao adaptador atual (UX-001 item 6)."""
+    SIMULATION = "Simulacao"       # o adaptador executa, mas e simulado (mock)
+    AVAILABLE = "Disponivel"       # backend real validado (nenhum hoje)
+    UNSUPPORTED = "Nao suportada"  # o adaptador nao implementa
+    UNKNOWN = "Desconhecida"       # sem adaptador ativo
+
+
+SIMULATED_ADAPTERS = frozenset({"mock"})
+
+
+def capability_status(kind: ActionKind, adapter_name: Optional[str],
+                      capabilities: frozenset[ActionKind]) -> CapabilityStatus:
+    if adapter_name is None:
+        return CapabilityStatus.UNKNOWN
+    if kind in ENGINE_ACTIONS:  # pausa/parada sao do proprio motor
+        return CapabilityStatus.AVAILABLE
+    if kind not in capabilities:
+        return CapabilityStatus.UNSUPPORTED
+    return CapabilityStatus.SIMULATION if adapter_name in SIMULATED_ADAPTERS else CapabilityStatus.AVAILABLE
