@@ -123,3 +123,22 @@ class ReplayAdapter:
         if self._close:
             self._close()
             self._close = None
+
+
+def state_from_dict(data: dict[str, Any], source: str = "snapshot") -> GameState:
+    """Reconstroi um GameState a partir de GameState.to_dict() (por exemplo, o
+    resumo gravado no journal). Campos ausentes voltam como desconhecidos."""
+
+    def entities(raw: Any) -> Any:
+        return tuple(parse_entity(e, source) for e in raw)
+
+    convert: dict[str, Callable[[Any], Any]] = {
+        "self_position": parse_position, "hp": float, "mp": float, "level": int, "exp": float,
+        "target": str, "in_combat": bool, "quest_dialog": bool, "characters": entities,
+        "npcs": entities, "inventory": dict, "quest_info": dict,
+    }
+    return GameState(
+        tick=int(data.get("tick", 0)),
+        timestamp=data.get("timestamp"),
+        **{name: parse_fact(data.get(name), source, fn) for name, fn in convert.items()},
+    )

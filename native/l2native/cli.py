@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from .adapters.base import AdapterUnavailable, GameAdapter
+from .adapters.factory import SourceKind, create_adapter
 from .engine import Engine, EngineConfig, EngineStatus
 from .journal import Journal, Record
 from .script import ScriptLoadError, load_script
@@ -47,13 +48,11 @@ def _build_adapter(args: argparse.Namespace) -> GameAdapter:
     if args.adapter == "replay":
         if not args.events:
             raise SystemExit("--adapter replay exige --events ARQUIVO.jsonl")
-        from .adapters.replay import ReplayAdapter
-        return ReplayAdapter.from_file(args.events)
+        return create_adapter(SourceKind.REPLAY, args.events)
     if args.adapter == "mock":
         if not args.scenario:
             raise SystemExit("--adapter mock exige --scenario ARQUIVO.json")
-        from .adapters.mock import MockAdapter
-        return MockAdapter.from_scenario(args.scenario)
+        return create_adapter(SourceKind.MOCK, args.scenario)
     if args.adapter == "visual":
         if not args.template or not (args.image or args.hwnd):
             raise SystemExit("--adapter visual exige --template e (--image ... ou --hwnd N)")
@@ -64,8 +63,7 @@ def _build_adapter(args: argparse.Namespace) -> GameAdapter:
         if args.image:
             return VisualAdapter(SequenceCapture(args.image), detector)
         return VisualAdapter(WindowClientCapture(args.hwnd), detector, samples=2)
-    from .adapters.live import LiveAdapter
-    return LiveAdapter()
+    return create_adapter(SourceKind.LIVE)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -86,7 +84,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     run.add_argument("--interval", type=float, default=0.0, help="segundos entre ciclos")
     run.add_argument("--journal", type=Path, help="gravar registro completo em JSONL")
     run.add_argument("--quiet", action="store_true")
+    sub.add_parser("gui", help="abrir a interface grafica (requer PySide6)")
     args = parser.parse_args(argv)
+    if args.command == "gui":
+        from .gui.app import main as gui_main
+        return gui_main([])
 
     try:
         script = load_script(args.script)
