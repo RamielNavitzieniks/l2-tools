@@ -1,0 +1,4 @@
+# Opcional: percepcao visual (detector de janela de missao) e captura no Windows.
+numpy>=1.24
+opencv-python-headless>=4.8
+mss>=9

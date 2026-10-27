@@ -1,0 +1,8 @@
+__pycache__/
+*.egg-info/
+build/
+.venv/
+# registros locais de execucao e capturas nunca devem ser versionados
+*.journal.jsonl
+journal*.jsonl
+assets/*.png

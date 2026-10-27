@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "l2tools-native"
+version = "0.1.0"
+description = "Motor independente de scripts Python para Lineage II (offline nesta versao)"
+requires-python = ">=3.10"
+dependencies = []  # o nucleo usa somente a biblioteca padrao
+
+[project.optional-dependencies]
+vision = ["numpy>=1.24", "opencv-python-headless>=4.8"]
+capture = ["mss>=9"]  # captura de janela no Windows
+
+[project.scripts]
+l2native = "l2native.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["l2native*"]
