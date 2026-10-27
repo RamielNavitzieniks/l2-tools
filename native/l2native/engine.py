@@ -10,6 +10,8 @@ Garantias:
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import threading
 import traceback
 from dataclasses import dataclass
@@ -41,6 +43,8 @@ class EngineConfig:
     max_consecutive_adapter_errors: int = 3
     max_move_distance: float = 5000.0     # recusa move_to mais longe que isso da posicao observada
     resume_stable_ticks: int = 2          # ciclos seguidos com dialogo observado fechado para retomar
+    pause_poll_interval: float = 0.05     # espera por ciclo durante pausa do operador (sem observar)
+    capture_script_output: bool = False   # print()/stderr do script viram registros 'script_output'
 
 
 @dataclass(frozen=True)
@@ -144,6 +148,7 @@ class Engine:
         self._cancel_reason = ""
         self._resume_requested = threading.Event()
         self._pause: Optional[dict[str, Any]] = None
+        self._pause_request: Optional[str] = None
         self._script_errors = 0
         self._adapter_errors = 0
         self._finished = False
@@ -156,6 +161,11 @@ class Engine:
     def request_resume(self) -> None:
         """Retomada explicita pelo operador apos intervencao manual."""
         self._resume_requested.set()
+
+    def request_pause(self, reason: str = "pausa solicitada pelo operador") -> None:
+        """Pausa no inicio do proximo ciclo; so o operador retoma. Enquanto
+        durar, o motor nao observa (um replay fica congelado, nao e consumido)."""
+        self._pause_request = reason
 
     # --- ciclo ---------------------------------------------------------------
     def start(self) -> bool:
@@ -188,6 +198,14 @@ class Engine:
             return self._finish(EngineStatus.STOPPED, self._cancel_reason)
         if self.config.max_ticks is not None and self.ticks >= self.config.max_ticks:
             return self._finish(EngineStatus.STOPPED, "limite de ciclos atingido")
+        if self._pause_request is not None and self.status is EngineStatus.RUNNING:
+            self._enter_pause(self._pause_request, "operator")
+            self._pause_request = None
+            return True
+        if (self.status is EngineStatus.PAUSED and self._pause["resume_on"] == "operator"
+                and not self._resume_requested.is_set()):
+            self._resume_requested.wait(self.config.pause_poll_interval)
+            return True
 
         state = self._observe()
         if state is None:
@@ -241,15 +259,33 @@ class Engine:
         return state
 
     def _call_script(self, fn: Callable[..., Any], hook: str, *args: Any) -> bool:
+        out = io.StringIO() if self.config.capture_script_output else None
         try:
-            fn(self.bot, *args)
+            with (contextlib.redirect_stdout(out) if out else contextlib.nullcontext()), \
+                    (contextlib.redirect_stderr(out) if out else contextlib.nullcontext()):
+                fn(self.bot, *args)
             return True
         except Exception as exc:
             self._script_errors += 1
             self.journal.write(self.bot.tick, "script_error", hook=hook, error=f"{type(exc).__name__}: {exc}",
+                               line=self._script_line(exc),
                                traceback=traceback.format_exc(limit=5).splitlines()[-6:],
                                consecutive=self._script_errors)
             return False
+        finally:
+            if out is not None and out.getvalue():
+                self.journal.write(self.bot.tick, "script_output", hook=hook, text=out.getvalue().rstrip("\n"))
+
+    def _script_line(self, exc: BaseException) -> Optional[int]:
+        """Linha do arquivo do script onde a excecao ocorreu (a mais interna)."""
+        if self.script.path is None:
+            return None
+        target = str(self.script.path)
+        line = None
+        for frame in traceback.extract_tb(exc.__traceback__):
+            if frame.filename == target:
+                line = frame.lineno
+        return line
 
     def _enqueue(self, kind: ActionKind, params: dict[str, Any]) -> Intent:
         intent = Intent(self._next_intent, kind, dict(params))
@@ -280,7 +316,7 @@ class Engine:
             results.append(result)
             self.journal.write(state.tick, "result", **result.to_dict())
             if halt == "pausa" and intent.kind is ActionKind.PAUSE and result.status.succeeded:
-                self._enter_pause(intent)
+                self._enter_pause(intent.params["reason"], intent.params.get("resume_on", "dialog_closed"))
         self.bot.last_results = tuple(results)
         if stop_reason is not None:
             return self._finish(EngineStatus.STOPPED, f"script solicitou parada: {stop_reason}")
@@ -315,12 +351,14 @@ class Engine:
         return None
 
     # --- pausa ---------------------------------------------------------------
-    def _enter_pause(self, intent: Intent) -> None:
+    @property
+    def pause_info(self) -> Optional[dict[str, Any]]:
+        return dict(self._pause) if self._pause else None
+
+    def _enter_pause(self, reason: str, resume_on: str) -> None:
         self.status = EngineStatus.PAUSED
         self._resume_requested.clear()
-        self._pause = {"reason": intent.params["reason"],
-                       "resume_on": intent.params.get("resume_on", "dialog_closed"),
-                       "since_tick": self.bot.tick, "clear_ticks": 0}
+        self._pause = {"reason": reason, "resume_on": resume_on, "since_tick": self.bot.tick, "clear_ticks": 0}
         self.journal.write(self.bot.tick, "paused", reason=self._pause["reason"], resume_on=self._pause["resume_on"])
 
     def _try_resume(self, state: GameState) -> bool:

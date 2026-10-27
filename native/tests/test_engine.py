@@ -283,7 +283,7 @@ class PauseResumeTest(unittest.TestCase):
         engine.request_resume()
         engine.step()
         self.assertEqual(engine.status, EngineStatus.RUNNING)
-        self.assertEqual(resumed, [4])
+        self.assertEqual(resumed, [2])  # sem observar durante a pausa: o replay nao foi consumido
         self.assertEqual(engine.journal.events("resumed")[0].data["by"], "operador")
 
     def test_actions_from_on_resume_are_processed(self):
