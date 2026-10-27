@@ -49,6 +49,21 @@ Anote cada item como ✅, ❌ (com o que aconteceu) ou ➖ (não testado). Não 
 | 4.1 | Instalar `native\plugins\event_counter`, ativar e rodar um exemplo | Pede confirmação; o resumo aparece nos eventos |
 | 4.2 | Desativar e remover | Pede confirmação; o plugin some da lista |
 
+## 5. Sessões locais descobertas (LIVE-IDENT-001)
+
+| # | Passo | Esperado |
+| --- | --- | --- |
+| 5.1 | Sem nenhum cliente aberto, aba **Sessões locais descobertas** | Mensagem “Nenhuma regra…” e lista vazia |
+| 5.2 | Abrir **um** cliente do Lineage II, marcar “Mostrar todas as janelas visíveis” | A janela do cliente aparece com executável, PID, HWND, título e classe. Se o executável aparecer como “?” (processo elevado), anotar |
+| 5.3 | Selecionar a janela do cliente → **Criar regra desta janela…** e descrever a evidência | Ao desmarcar “Mostrar todas”, só a janela do cliente fica, com “localizada (regra: …)” |
+| 5.4 | **Associar…** com o rótulo do personagem | “Perfil associado” mostra o rótulo “(associado pelo operador)”; “Identidade observada” continua **desconhecida**; “Telemetria real” continua **indisponível** |
+| 5.5 | Abrir um **segundo** cliente | Duas linhas candidatas; associar o segundo rótulo; o mesmo rótulo não pode ir para as duas |
+| 5.6 | Fechar um cliente com “Atualizar a cada 2 s” ligado | A linha some e o evento “janela fechada: associação removida” aparece |
+| 5.7 | Fechar e reabrir o L2-Tools | A regra continua; os vínculos **não** voltam sozinhos |
+| 5.8 | `python -m l2native windows --all` no terminal | Mesma lista, sem gravar nada |
+
+Para cada item, anote a regra que funcionou (executável/classe), sem títulos com nomes de personagens.
+
 ## Resultado
 
 Registrar na issue #1, sem dados sensíveis:
