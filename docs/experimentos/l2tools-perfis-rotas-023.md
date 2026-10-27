@@ -70,7 +70,14 @@ $ for i in 1..10: python -m unittest tests.test_gui            # 10/10 sem falha
 - volta ao nó 1;
 - encerra no ciclo 45 com `destino alcancado: no 1 (trechos=2)`.
 
-CI: ver a seção *Resultado da CI* abaixo.
+## Resultado da CI
+
+A CI da PR #16 rodou no [run 40482834828](https://github.com/LyannaValerie/l2-tools/actions/runs/40482834828) em três ambientes: Ubuntu/Python 3.10, Ubuntu/Python 3.13 e **Windows/Python 3.12**. Os três passaram, e em cada um rodaram 117 testes:
+
+- **sem as dependências opcionais:** 27 pulados;
+- **com numpy, OpenCV e PySide6 offscreen:** 1 pulado, o teste de outra plataforma.
+
+A primeira execução ([run 40482646892](https://github.com/LyannaValerie/l2-tools/actions/runs/40482646892)) falhou só no Python 3.10. Nessa versão, `datetime.fromisoformat` não aceita fração de segundo com 1 dígito. A correção normaliza a fração em `state_time_ms`, e o teste agora cobre 1 e 6 dígitos e o timestamp inválido.
 
 ## Limitações
 
