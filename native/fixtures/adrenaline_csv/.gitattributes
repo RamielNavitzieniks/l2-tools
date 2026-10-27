@@ -1,0 +1,2 @@
+# bytes exatos (CRLF) como nos CSVs reais
+*.csv -text

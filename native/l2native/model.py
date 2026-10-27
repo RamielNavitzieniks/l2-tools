@@ -95,9 +95,12 @@ class Entity:
     npc_id: Optional[int] = None    # tipo de NPC (varios NPCs podem ter o mesmo)
     dead: Fact[bool] = field(default_factory=unknown)
     object_id: Optional[int] = None  # instancia, quando a fonte a identifica (no mock: sequencial)
+    spawn: Fact[Position] = field(default_factory=unknown)   # ponto de origem, quando a fonte o informa
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"position": self.position.to_dict(), "dead": self.dead.to_dict()}
+        if self.spawn.known or self.spawn.note:
+            out["spawn"] = self.spawn.to_dict()
         if self.name is not None:
             out["name"] = self.name
         if self.npc_id is not None:

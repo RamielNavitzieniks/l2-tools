@@ -1,6 +1,7 @@
 """ReplayAdapter: reproduz estados gravados em JSONL. Somente observacao.
 
-Formato de cada linha (todos os campos opcionais; ausente = desconhecido):
+Formato `l2tools-replay/1` (contrato completo em docs/contratos/replay.md).
+Cada linha e um estado (todos os campos opcionais; ausente = desconhecido):
 
     {"timestamp": "...", "self": {"position": [x, y, z], "hp": 0.9, "level": 40},
      "quest_dialog": true, "characters": [{"name": "Sarynne", "position": [x, y, z]}],
@@ -9,10 +10,17 @@ Formato de cada linha (todos os campos opcionais; ausente = desconhecido):
 Qualquer valor pode ser substituido por um Fact explicito:
     {"status": "inferred", "value": ..., "source": "...", "confidence": 0.7}
 `null` e um Fact desconhecido. Linhas vazias e linhas iniciadas por `#` sao ignoradas.
+
+Opcionais, preservados no arquivo e expostos em `ReplayAdapter.record`, mas fora
+do GameState: `seq`, `elapsed_ms`, `event` e `raw` (valores da fonte original).
+A primeira linha pode ser `{"replay_meta": {...}}` (formato, origem, conversor);
+ela nao vira estado e fica em `ReplayAdapter.meta`.
 """
 from __future__ import annotations
 
 import json
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Optional
 
@@ -50,6 +58,7 @@ def parse_entity(raw: Any, source: str) -> Entity:
         object_id=raw.get("object_id"),
         position=parse_fact(raw.get("position"), source, parse_position),
         dead=parse_fact(raw.get("dead"), source, bool),
+        spawn=parse_fact(raw.get("spawn"), source, parse_position),
     )
 
 
@@ -81,6 +90,11 @@ def parse_state(data: dict[str, Any], tick: int, source: str) -> GameState:
     )
 
 
+REPLAY_FORMAT = "l2tools-replay/1"
+META_KEY = "replay_meta"
+RECORD_EXTRAS = ("seq", "elapsed_ms", "event", "raw")
+
+
 class ReplayAdapter:
     """Le estados de um JSONL (arquivo ou iteravel de linhas). Nao executa acoes:
     toda intencao recebe UNSUPPORTED, deixando claro que nada chegou ao jogo."""
@@ -92,6 +106,8 @@ class ReplayAdapter:
         self._source = source
         self._tick = 0
         self._close: Optional[Callable[[], None]] = None
+        self.meta: dict[str, Any] = {}
+        self.record: dict[str, Any] = {}   # extras da ultima linha lida (seq, elapsed_ms, event, raw)
 
     @classmethod
     def from_file(cls, path: Path | str) -> "ReplayAdapter":
@@ -106,11 +122,19 @@ class ReplayAdapter:
             text = line.strip()
             if not text or text.startswith("#"):
                 continue
-            self._tick += 1
             try:
-                return parse_state(json.loads(text), self._tick, self._source)
+                data = json.loads(text)
+                if isinstance(data, dict) and META_KEY in data:
+                    if self._tick or self.meta:
+                        raise ValueError(f"'{META_KEY}' so pode aparecer na primeira linha")
+                    self.meta = _check_meta(data[META_KEY])
+                    continue
+                state = parse_state(data, self._tick + 1, self._source)
             except (ValueError, KeyError, TypeError) as exc:
                 raise AdapterError(f"linha {line_number}: {exc}") from exc
+            self._tick += 1
+            self.record = {k: data[k] for k in RECORD_EXTRAS if k in data}
+            return state
         raise SourceExhausted("fim do arquivo de replay")
 
     def observes(self) -> Optional[frozenset[str]]:
@@ -127,6 +151,54 @@ class ReplayAdapter:
         if self._close:
             self._close()
             self._close = None
+
+
+def _check_meta(meta: Any) -> dict[str, Any]:
+    if not isinstance(meta, dict):
+        raise ValueError(f"'{META_KEY}' deve ser objeto")
+    fmt = meta.get("format")
+    if fmt != REPLAY_FORMAT:
+        raise ValueError(f"formato de replay nao suportado: {fmt!r} (esperado {REPLAY_FORMAT})")
+    return meta
+
+
+@dataclass
+class ReplaySummary:
+    """Contagem, por campo do GameState, de estados observados/inferidos/desconhecidos."""
+    meta: dict[str, Any]
+    states: int = 0
+    fields: dict[str, Counter] = field(default_factory=dict)
+    entities: dict[str, Counter] = field(default_factory=dict)   # "npcs.position", "characters.dead"...
+    events: Counter = field(default_factory=Counter)
+
+
+def summarize(path: Path | str) -> ReplaySummary:
+    """Le o replay inteiro pelo mesmo caminho do motor (ReplayAdapter) e conta o status
+    de cada fato. Erro de formato vira AdapterError com o numero da linha."""
+    adapter = ReplayAdapter.from_file(path)
+    try:
+        out = ReplaySummary(meta={})
+        while True:
+            try:
+                state = adapter.observe()
+            except SourceExhausted:
+                break
+            out.meta = adapter.meta
+            out.states += 1
+            for name in GameState.FACT_FIELDS:
+                fact = getattr(state, name)
+                out.fields.setdefault(name, Counter())[fact.status.value] += 1
+                if name in ("npcs", "characters") and fact.known:
+                    for e in fact.value:
+                        for sub in ("position", "dead", "spawn"):
+                            out.entities.setdefault(f"{name}.{sub}", Counter())[getattr(e, sub).status.value] += 1
+            event = adapter.record.get("event")
+            if isinstance(event, dict):
+                out.events[f"{event.get('origin', '?')}:{event.get('kind', '?')}"] += 1
+        out.meta = adapter.meta
+        return out
+    finally:
+        adapter.close()
 
 
 def state_from_dict(data: dict[str, Any], source: str = "snapshot") -> GameState:

@@ -87,6 +87,36 @@ def _windows(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _replay_info(args: argparse.Namespace) -> int:
+    """Mostra, por campo, quantos estados do replay tem valor observado, inferido ou desconhecido."""
+    from .adapters.base import AdapterError
+    from .adapters.replay import summarize
+    try:
+        summary = summarize(args.file)
+    except (OSError, AdapterError) as exc:
+        print(f"ERRO: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    meta = summary.meta
+    print(f"arquivo: {args.file.name}  estados: {summary.states}  formato: {meta.get('format', '(sem replay_meta)')}")
+    for key in ("origin", "converter", "note"):
+        if meta.get(key):
+            print(f"{key}: {json.dumps(meta[key], ensure_ascii=False)}")
+
+    def row(name: str, c: Any) -> str:
+        return (f"  {name:<22} observado={c.get('observed', 0):<5} inferido={c.get('inferred', 0):<5} "
+                f"desconhecido={c.get('unknown', 0)}")
+    print("campos do estado:")
+    for name, counts in summary.fields.items():
+        print(row(name, counts))
+    if summary.entities:
+        print("campos das entidades:")
+        for name, counts in sorted(summary.entities.items()):
+            print(row(name, counts))
+    if summary.events:
+        print("eventos: " + ", ".join(f"{k}={v}" for k, v in sorted(summary.events.items())))
+    return EXIT_OK
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="l2native", description="Motor Python nativo do L2-Tools (offline)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -109,12 +139,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     win = sub.add_parser("windows", help="listar janelas locais (somente leitura, Windows)")
     win.add_argument("--all", action="store_true", help="incluir janelas que nao casam com nenhuma regra")
     win.add_argument("--config", type=Path, help="discovery.json com as regras (padrao: nenhuma regra)")
+    info = sub.add_parser("replay-info", help="contar valores observados/desconhecidos de um replay")
+    info.add_argument("file", type=Path, help="replay .jsonl")
     args = parser.parse_args(argv)
     if args.command == "gui":
         from .gui.app import main as gui_main
         return gui_main([])
     if args.command == "windows":
         return _windows(args)
+    if args.command == "replay-info":
+        return _replay_info(args)
 
     try:
         script = load_script(args.script)

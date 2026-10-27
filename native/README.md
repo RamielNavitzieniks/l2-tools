@@ -1,4 +1,4 @@
-# L2-Tools Native (experimentos 020, 021, 023, 024 e 025)
+# L2-Tools Native (experimentos 020, 021, 023, 024, 025 e 027)
 
 Motor **independente** de automação para Lineage II, com scripts escritos diretamente em Python. Não depende do Adrenaline nem do interpretador Pascal.
 
@@ -91,6 +91,9 @@ python -m l2native run --script scripts/hunter.py --adapter mock --scenario fixt
 
 # LiveAdapter: encerra com código 3 e a mensagem "não implementado"
 python -m l2native run --script scripts/quest_watch.py --adapter live
+
+# quanto de cada campo um replay observa, infere ou desconhece
+python -m l2native replay-info fixtures/quest_dialog.jsonl
 ```
 
 Outras opções:
@@ -102,6 +105,17 @@ Outras opções:
 - `--param chave=valor` é repassado a `bot.params`. O valor é lido como JSON quando possível.
 
 Códigos de saída: `0` encerramento controlado; `1` falha (script ou adaptador); `2` script inválido; `3` adaptador indisponível.
+
+### Dados históricos → replay (exp. 027)
+
+`conversores/adrenaline_csv.py` converte, **offline**, os CSVs que os scripts da Founder exportaram (GravadorQuest, QuestProbe, LeituraSpots) para o formato de replay (`../docs/contratos/replay.md`). Grava também um relatório de perdas e ambiguidades. É uma ferramenta de migração: o pacote `l2native` não a importa.
+
+```sh
+python -m conversores.adrenaline_csv fixtures/adrenaline_csv/GravadorQuest_20260101_120000.csv -o gravador.jsonl
+python -m l2native replay-info gravador.jsonl
+```
+
+Os CSVs de `fixtures/adrenaline_csv/` são sintéticos. Detalhes em `../docs/experimentos/l2tools-replay-historico-027.md`.
 
 ### Observação visual (opcional)
 
@@ -121,7 +135,7 @@ cd native
 python -m unittest discover -s tests -t . -v
 ```
 
-São 139 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt` e `requirements-gui.txt`. A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
+São 160 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt` e `requirements-gui.txt`. A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
 
 ## Arquitetura
 
@@ -144,7 +158,7 @@ Adapter -->|  GameState -> script decide -> intenções  -> parâmetros -> só s
 | `script.py` | Carregamento por `importlib` e validação do contrato. |
 | `journal.py` | Registro estruturado, em memória e opcionalmente em JSONL. |
 | `geometry.py` | Fórmulas portadas dos experimentos 015–017. |
-| `adapters/` | `ReplayAdapter`, `MockAdapter` (com combate simulado opcional em `simcombat.py`), `VisualAdapter` e `LiveAdapter` (não implementado). |
+| `adapters/` | `ReplayAdapter` (formato `l2tools-replay/1`, `replay_meta`, `summarize`), `MockAdapter` (com combate simulado opcional em `simcombat.py`), `VisualAdapter` e `LiveAdapter` (não implementado). |
 | `vision/` | `TemplateDetector` (OpenCV) e as capturas `SequenceCapture` / `WindowClientCapture`. |
 | `session.py` | Motor numa thread de trabalho, com estados (ocioso, executando, pausado, parando, parado, falhou) e eventos para a GUI. |
 | `rules.py` | `Condition` e `Rule` tipadas, com avaliação em três valores, `FilterRule` e `RuleEngine` (prioridade, atraso, intervalo; só decide, não executa). |
@@ -156,6 +170,7 @@ Adapter -->|  GameState -> script decide -> intenções  -> parâmetros -> só s
 | `observation.py` | Conjunto mínimo de observações e `ObservationMonitor` (cobertura, proveniência, erros e latência). |
 | `plugins.py` | `PluginManager`: manifesto, API versionada, permissões e ciclo de vida com confirmação. |
 | `mapping.py` | Transformação mundo ↔ tela do mapa XY (zoom ancorado, enquadramento, grade). |
+| `../conversores/` | Fora do núcleo: conversores de dados históricos para replay (exp. 027). |
 | `gui/` | PySide6: `MainWindow`, `MapView`, `ScriptEditor`, painéis e `ConfigDialog`. |
 
 ### Garantias do motor
@@ -269,7 +284,7 @@ Só `completed` e `dispatched` contam como sucesso.
 
 ## Próximos componentes recomendados
 
-1. Gravar replays a partir de observações autorizadas, como a visão ou exportações manuais, e evoluir o formato JSONL com campos de proveniência reais.
+1. Gravar replays a partir de observações autorizadas, como a visão. As exportações manuais já são convertidas (exp. 027), com proveniência em `replay_meta`.
 2. Validar o `VisualAdapter` no Windows da Founder com um modelo real da Quest Chat: janela aberta e fechada, escalas de interface, fullscreen e janela.
 3. Ampliar a percepção visual (barras de HP/MP, alvo) apenas com modelos medidos e sempre com confiança e origem.
 4. Fazer o planejador de tarefas e os objetivos (spot → caça → recuperação) consumir o mesmo contrato, ainda no mock.
