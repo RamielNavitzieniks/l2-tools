@@ -1,0 +1,10 @@
+# Posicoes SIMULADAS (unidades do jogo), nao coletadas no Live.
+{"self": {"position": [0, 0, -3100]}, "quest_dialog": false, "characters": [{"name": "Sarynne", "position": [200, 0, -3100]}]}
+{"self": {"position": [0, 0, -3100]}, "quest_dialog": false, "characters": [{"name": "Sarynne", "position": [500, 0, -3100]}]}
+{"self": {"position": [100, 0, -3100]}, "quest_dialog": false, "characters": [{"name": "Sarynne", "position": [700, 0, -3100]}]}
+{"self": {"position": [260, 0, -3100]}, "quest_dialog": false, "characters": [{"name": "Sarynne", "position": [800, 0, -3100]}]}
+{"self": {"position": [400, 0, -3100]}, "quest_dialog": false, "characters": []}
+{"self": {"position": [500, 0, -3100]}, "quest_dialog": false, "characters": null}
+{"self": {"position": [560, 0, -3100]}, "quest_dialog": false, "characters": [{"name": "sarynne", "position": [900, 100, -3100]}]}
+{"self": {"position": [850, 80, -3100]}, "quest_dialog": false, "characters": [{"name": "Sarynne", "position": [900, 100, -3100]}]}
+{"self": {"position": [850, 80, -3100]}, "quest_dialog": false, "characters": [{"name": "Sarynne", "position": [900, 100, -2500]}]}

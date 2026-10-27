@@ -1,0 +1,7 @@
+{
+  "_comment": "Mundo SIMULADO: Sarynne percorre tres waypoints a 80 unidades/ciclo; a seguidora anda ate 110 unidades/ciclo.",
+  "self": {"position": [0, 0, -3100], "speed": 110},
+  "characters": {"Sarynne": {"path": [[300, 0, -3100], [2000, 0, -3100], [2000, 1500, -3100]], "speed": 80}},
+  "capabilities": ["move_to"],
+  "ticks": 60
+}

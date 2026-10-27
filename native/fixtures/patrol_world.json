@@ -1,0 +1,7 @@
+{
+  "_comment": "Mundo SIMULADO: personagem anda 60 unidades/ciclo em linha reta; janela de missao aparece no ciclo 30 e fecha no 34.",
+  "self": {"position": [1000, 2000, -3100], "speed": 60},
+  "facts_at": {"30": {"quest_dialog": true}, "34": {"quest_dialog": false}},
+  "capabilities": ["move_to"],
+  "ticks": 400
+}
