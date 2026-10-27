@@ -80,7 +80,7 @@ class WindowClientCapture:
         self._region = region
         self._require_foreground = require_foreground
         self._expected_pid = expected_pid
-        self._mss = mss.mss()
+        self._mss = getattr(mss, "MSS", mss.mss)()   # mss.mss esta obsoleto nas versoes novas
 
     def _client_rect(self) -> tuple[int, int, int, int]:
         import ctypes
