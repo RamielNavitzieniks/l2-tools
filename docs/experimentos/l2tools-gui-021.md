@@ -40,11 +40,13 @@ $ python -m unittest discover -s tests -t .                   # sem dependencias
 Ran 94 tests ... OK (skipped=22)       # visao (8), GUI (13), Windows (1)
 ```
 
+CI da PR #15 ([run 40479359526](https://github.com/LyannaValerie/l2-tools/actions/runs/40479359526)): Ubuntu/Python 3.10, Ubuntu/Python 3.13 e **Windows/Python 3.12**. Em cada um, 94 testes passaram: 22 pulados sem as dependências opcionais; com numpy, OpenCV e PySide6 offscreen, só 1 pulado (o teste de outra plataforma). Ou seja, os testes de GUI rodaram também no Windows.
+
 A suíte completa foi repetida 25 vezes seguidas sem falha, depois de corrigir um teste de GUI que dependia de tempo: a patrulha de 5 ms por ciclo podia terminar antes do clique em Pausar.
 
 ## Limitações
 
-- A GUI não foi aberta por uma pessoa num Windows real. A CI cobre Windows apenas offscreen.
+- A GUI não foi aberta por uma pessoa num Windows real. A CI executou os 13 testes de GUI no Windows, mas apenas offscreen.
 - Nenhuma política configurada (cura, buff, ataque, busca de alvo, drop, morte, relaxar) é executada; o editor apenas salva. As páginas dizem isso.
 - O painel de Drops não tem fonte de dados em nenhum adaptador.
 - O editor não tem depuração, breakpoints nem várias abas.
