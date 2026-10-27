@@ -59,7 +59,23 @@ $ python -m l2native windows                                    # Linux
 Descoberta indisponivel: descoberta de janelas so existe no Windows   (codigo 3)
 ```
 
-O código Win32 **não roda neste ambiente Linux**. A evidência dele vem da CI no Windows: ver *Resultado da CI*.
+O código Win32 **não roda neste ambiente Linux**. A evidência dele vem da CI no Windows (abaixo).
+
+## Resultado da CI
+
+A CI da PR #18 rodou no [run 40504358186](https://github.com/LyannaValerie/l2-tools/actions/runs/40504358186) em três ambientes: Ubuntu/Python 3.10, Ubuntu/Python 3.13 e **Windows/Python 3.12**. Os três passaram na primeira execução, e em cada um rodaram 137 testes:
+
+- **sem as dependências opcionais:** 31 pulados;
+- **com numpy, OpenCV e PySide6 offscreen:** 2 pulados (os testes da outra plataforma).
+
+No Windows, `Win32DiscoveryTest.test_enumerates_own_window_with_process_name` **passou** nas duas suítes. O teste cria uma janela tkinter real e confirma quatro coisas:
+
+- a enumeração a encontra pelo título;
+- o executável é lido como `python*`;
+- uma regra criada a partir dela a seleciona;
+- `python -m l2native windows --config` sai com código 0.
+
+Os testes de GUI também abriram a descoberta Win32 real no runner. Isso não substitui a validação com o cliente do Lineage II, que cabe à Founder.
 
 ## Decisões da Founder
 
