@@ -102,7 +102,7 @@ class RuleDialog(QDialog):
         self.cond_list = QListWidget()
         self.c_field = QComboBox()
         for f in ConditionField:
-            self.c_field.addItem(f.label, f)
+            self.c_field.addItem(f.label, f.value)   # valor simples: o PySide6 6.12 devolve enums str como str
         self.c_op = QComboBox()
         self.c_value = QLineEdit()
         self.c_field.currentIndexChanged.connect(self._sync_ops)
@@ -146,7 +146,7 @@ class RuleDialog(QDialog):
                 self._append(c)
 
     def _sync_ops(self) -> None:
-        f: ConditionField = self.c_field.currentData()
+        f = ConditionField(self.c_field.currentData())
         self.c_op.clear()
         ops = [Operator.EQ, Operator.NE] if f.type is FieldType.BOOL else list(Operator)
         self.c_op.addItems([o.value for o in ops])
@@ -157,7 +157,7 @@ class RuleDialog(QDialog):
         self.cond_list.addItem(c.describe())
 
     def _add_condition(self) -> None:
-        f: ConditionField = self.c_field.currentData()
+        f = ConditionField(self.c_field.currentData())
         raw = self.c_value.text().strip()
         try:
             if f.type is FieldType.BOOL:

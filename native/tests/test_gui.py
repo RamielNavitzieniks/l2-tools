@@ -223,6 +223,33 @@ class PluginPanelTest(GuiTestCase):
         self.assertEqual(panel.list.count(), 0)
 
 
+class ComboEnumTest(GuiTestCase):
+    """Regressao (Windows, PySide6 6.12): enums que herdam de str voltavam do QComboBox
+    como str puro ('str' object has no attribute 'label' / 'type'). Agora os testes
+    passam pelo proprio combo, como o operador."""
+
+    def test_source_combo_by_user_keeps_source_kind(self):
+        w = self.win
+        for i, kind in enumerate(SourceKind):
+            w.source_combo.setCurrentIndex(i)
+            self.assertIs(w.source_kind, kind)
+            self.assertIn(f"Fonte: {kind.label}", w.status_label.text())
+        w.set_source(SourceKind.MOCK, None)
+        self.assertEqual(w.source_combo.currentIndex(), list(SourceKind).index(SourceKind.MOCK))
+
+    def test_rule_dialog_field_combo_for_every_field(self):
+        from l2native.gui.config import RuleDialog
+        from l2native.rules import FieldType
+        dlg = RuleDialog(parent=self.win)
+        for i, f in enumerate(ConditionField):
+            dlg.c_field.setCurrentIndex(i)
+            self.assertEqual(dlg.c_op.count(), 2 if f.type is FieldType.BOOL else len(Operator))
+            dlg.c_value.setText("sim" if f.type is FieldType.BOOL else "10")
+            dlg._add_condition()
+            self.assertEqual(dlg.error.text(), "")
+            self.assertIs(dlg.conditions[-1].field, f)
+
+
 class ConfigDialogTest(GuiTestCase):
     def test_sections_status_edit_diff_and_import_export(self):
         from l2native.gui.config import ConfigDialog

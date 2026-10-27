@@ -82,3 +82,16 @@ Os testes de GUI também abriram a descoberta Win32 real no runner. Isso não su
 1. Fazer ou não o merge (#18 → #17 → … → `main`).
 2. Executar a seção 5 do checklist com 1 e 2 clientes e informar a regra que funcionou (executável/classe), sem capturas.
 3. Decidir se o próximo incremento é o `VisualIdentityProbe` (OCR do nome na área cliente da janela associada, com confiança e estado desconhecido quando a interface estiver oculta).
+
+## Correção após o primeiro teste no Windows (27/10/2026)
+
+Ao abrir a GUI no Windows, a Founder recebeu dois erros:
+
+- `'str' object has no attribute 'label'`, ao trocar a fonte no combo;
+- `'str' object has no attribute 'type'`, ao abrir "Adicionar regra".
+
+**Causa:** o PySide6 6.12 devolve como `str` puro os enums que herdam de `str` (`SourceKind`, `ConditionField`) guardados como dado de um `QComboBox`. Os testes não pegaram porque chamavam `set_source` diretamente.
+
+**Correção:** os combos guardam o `.value` e convertem de volta para o enum. Os outros usos de dado de item do Qt na GUI guardam `str` comum e não foram afetados.
+
+**Teste:** `ComboEnumTest` passa pelo próprio combo, como o operador. Sem a correção, reproduz os dois erros.

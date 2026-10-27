@@ -206,8 +206,8 @@ class MainWindow(QMainWindow):
         self.addToolBar(tb)
         self.source_combo = QComboBox()
         for kind in SourceKind:
-            self.source_combo.addItem(kind.label, kind)
-        self.source_combo.currentIndexChanged.connect(lambda _: self.set_source(self.source_combo.currentData(), None))
+            self.source_combo.addItem(kind.label, kind.value)   # valor simples: o PySide6 6.12 devolve enums str como str
+        self.source_combo.currentIndexChanged.connect(lambda _: self.set_source(SourceKind(self.source_combo.currentData()), None))
         tb.addWidget(QLabel(" Fonte: "))
         tb.addWidget(self.source_combo)
         self.source_button = QPushButton("Escolher arquivo…")
@@ -278,7 +278,7 @@ class MainWindow(QMainWindow):
     def set_source(self, kind: SourceKind, path: Optional[Path | str]) -> None:
         self.source_kind = kind
         self.source_path = Path(path) if path else None
-        if self.source_combo.currentData() is not kind:
+        if self.source_combo.currentData() != kind.value:
             self.source_combo.blockSignals(True)
             self.source_combo.setCurrentIndex(list(SourceKind).index(kind))
             self.source_combo.blockSignals(False)
