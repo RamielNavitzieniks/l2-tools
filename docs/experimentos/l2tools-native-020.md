@@ -67,6 +67,8 @@ FIM: failed (adaptador indisponivel: LiveAdapter nao implementado: ...); ciclos=
 3
 ```
 
+CI da PR #14 ([run 40476493730](https://github.com/LyannaValerie/l2-tools/actions/runs/40476493730)): Ubuntu/Python 3.10, Ubuntu/Python 3.13 e **Windows/Python 3.12** → 60 testes OK em cada um. Sem numpy/OpenCV, 9 pulados; com numpy + OpenCV, 1 pulado (o teste específico de outra plataforma).
+
 ## Critérios de conclusão da missão
 
 | # | Critério | Evidência |
@@ -85,7 +87,6 @@ FIM: failed (adaptador indisponivel: LiveAdapter nao implementado: ...); ciclos=
 
 - Nenhuma execução contra o cliente Lineage II. O `LiveAdapter` está **não implementado** de propósito; veja `docs/pesquisa/integracao-live-020.md`.
 - `WindowClientCapture` (Windows/mss) não foi executado; a CI em Windows cobre apenas a recusa sem HWND.
-- Não houve teste com Python 3.10–3.13 neste ambiente; isso fica a cargo da CI (matriz 3.10/3.13 Ubuntu e 3.12 Windows), ainda sem execução registrada aqui.
 - Não há modelo real da Quest Chat; a detecção foi validada só com imagens artificiais.
 - O mundo simulado não modela terreno nem latência, então a patrulha e o seguimento simulados não provam o comportamento em jogo.
 
