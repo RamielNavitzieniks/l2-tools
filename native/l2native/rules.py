@@ -7,7 +7,9 @@ Regras so configuram: nenhuma acao e executada a partir delas nesta fase.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Optional
 
@@ -281,9 +283,10 @@ class RuleEngine:
 def state_time_ms(state: GameState, fallback_tick_ms: int = 500) -> int:
     """Tempo do estado em ms: timestamp ISO-8601 quando existe; senao, ciclo x passo simulado."""
     if state.timestamp:
+        # Python 3.10 so aceita fracao com 3 ou 6 digitos e nao aceita "Z"
+        text = re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "000000")[:6], state.timestamp.replace("Z", "+00:00"))
         try:
-            from datetime import datetime
-            return int(datetime.fromisoformat(state.timestamp.replace("Z", "+00:00")).timestamp() * 1000)
+            return int(datetime.fromisoformat(text).timestamp() * 1000)
         except ValueError:
             pass
     return state.tick * fallback_tick_ms

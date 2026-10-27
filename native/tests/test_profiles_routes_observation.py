@@ -130,6 +130,8 @@ class RuleEngineTest(unittest.TestCase):
     def test_state_time(self):
         self.assertEqual(state_time_ms(GameState(tick=4)), 2000)
         self.assertEqual(state_time_ms(GameState(tick=1, timestamp="1970-01-01T00:00:01.5Z")), 1500)
+        self.assertEqual(state_time_ms(GameState(tick=1, timestamp="1970-01-01T00:00:02.123456+00:00")), 2123)
+        self.assertEqual(state_time_ms(GameState(tick=3, timestamp="ontem")), 1500)     # invalido: usa o ciclo
 
 
 class EntityCatalogTest(unittest.TestCase):
@@ -256,7 +258,9 @@ class ObservationContractTest(unittest.TestCase):
 
     def test_adapters_declare_and_engine_journals_latency(self):
         self.assertEqual(LiveAdapter().observes(), frozenset())
-        self.assertIsNone(ReplayAdapter.from_file(FIXTURES / "quest_dialog.jsonl").observes())
+        replay = ReplayAdapter.from_file(FIXTURES / "quest_dialog.jsonl")
+        self.addCleanup(replay.close)
+        self.assertIsNone(replay.observes())
         mock = MockAdapter(facts_at={2: {"hp": 0.5}}, ticks=3)
         self.assertEqual(mock.observes(), frozenset({"self_position", "characters", "quest_dialog", "hp"}))
         self.assertNotIn("self_position", MockAdapter(self_position=None).observes())
