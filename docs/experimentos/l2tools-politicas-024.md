@@ -58,7 +58,12 @@ $ python -m l2native run --script scripts/hunter.py --adapter mock --scenario fi
 FIM: stopped (script solicitou parada: concluido: 3 alvos derrotados); ciclos=63
 ```
 
-CI: ver *Resultado da CI*.
+## Resultado da CI
+
+A CI da PR #17 rodou no [run 40499702440](https://github.com/LyannaValerie/l2-tools/actions/runs/40499702440) em três ambientes: Ubuntu/Python 3.10, Ubuntu/Python 3.13 e **Windows/Python 3.12**. Os três passaram na primeira execução, e em cada um rodaram 127 testes:
+
+- **sem as dependências opcionais:** 28 pulados;
+- **com numpy, OpenCV e PySide6 offscreen:** 1 pulado, o teste de outra plataforma.
 
 ## Fora do escopo (continua pendente)
 
