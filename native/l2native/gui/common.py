@@ -16,7 +16,7 @@ CATEGORIES = {
     "script_log": "script", "script_output": "script",
     "engine_start": "motor", "engine_stop": "motor", "observation": "observacoes",
     "plugin_log": "plugins", "plugin_installed": "plugins", "plugin_enabled": "plugins",
-    "plugin_disabled": "plugins", "plugin_removed": "plugins",
+    "plugin_disabled": "plugins", "plugin_removed": "plugins", "plugin_slow": "plugins",
 }
 
 FILTERS = (

@@ -92,8 +92,9 @@ class Entity:
     """Personagem ou NPC observado. Campos internos tambem sao Facts."""
     name: Optional[str]
     position: Fact[Position]
-    npc_id: Optional[int] = None
+    npc_id: Optional[int] = None    # tipo de NPC (varios NPCs podem ter o mesmo)
     dead: Fact[bool] = field(default_factory=unknown)
+    object_id: Optional[int] = None  # instancia, quando a fonte a identifica (no mock: sequencial)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"position": self.position.to_dict(), "dead": self.dead.to_dict()}
@@ -101,6 +102,8 @@ class Entity:
             out["name"] = self.name
         if self.npc_id is not None:
             out["npc_id"] = self.npc_id
+        if self.object_id is not None:
+            out["object_id"] = self.object_id
         return out
 
 

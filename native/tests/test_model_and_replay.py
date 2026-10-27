@@ -91,7 +91,10 @@ class ValidateParamsTest(unittest.TestCase):
             (ActionKind.MOVE_TO, {"x": 1, "y": 2, "z": 3, "speed": 9}, "desconhecido"),
             (ActionKind.FOLLOW, {"character": " ", "distance": 250}, "'character'"),
             (ActionKind.FOLLOW, {"character": "S", "distance": -1}, "positiva"),
-            (ActionKind.SELECT_TARGET, {}, "'name' ou 'npc_id'"),
+            (ActionKind.SELECT_TARGET, {}, "'name', 'npc_id' ou 'object_id'"),
+            (ActionKind.SELECT_TARGET, {"object_id": 0}, "inteiro positivo"),
+            (ActionKind.REST, {"sit": "sim"}, "booleano"),
+            (ActionKind.REST, {}, "ausente: 'sit'"),
             (ActionKind.TELEPORT, {"destination_id": 0}, "inteiro positivo"),
             (ActionKind.PAUSE, {"reason": "x", "resume_on": "nunca"}, "resume_on"),
         ]:

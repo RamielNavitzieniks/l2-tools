@@ -12,6 +12,10 @@ e um modulo `entry` com `activate(api)` e, opcionalmente, `deactivate()` e
 Plugins sao codigo Python local executado SEM sandbox. Instalar, ativar e
 remover exigem confirmacao explicita; nada e ativado automaticamente ao abrir,
 e nada e baixado. Nenhuma permissao da API 1 da acesso ao jogo.
+
+Plugins rodam na thread da interface: cada `on_record` e cronometrado; acima de
+`slow_ms` gera `plugin_slow`, e `max_slow` chamadas lentas seguidas desativam o
+plugin (estado erro) para nao travar a GUI (registro 021).
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ import json
 import re
 import shutil
 import sys
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -83,6 +88,7 @@ class PluginInfo:
     state: PluginState
     error: str = ""
     module: Optional[ModuleType] = field(default=None, repr=False)
+    slow_calls: int = 0      # chamadas lentas seguidas de on_record
 
     @property
     def id(self) -> str:
@@ -102,10 +108,12 @@ class PluginAPI:
 
 
 class PluginManager:
-    def __init__(self, root: Path | str, notify: Optional[Callable[[str, dict[str, Any]], None]] = None) -> None:
+    def __init__(self, root: Path | str, notify: Optional[Callable[[str, dict[str, Any]], None]] = None, *,
+                 slow_ms: float = 50.0, max_slow: int = 3, clock: Callable[[], float] = time.perf_counter) -> None:
         self.root = Path(root)
         self.plugins: dict[str, PluginInfo] = {}
         self._notify_cb = notify
+        self.slow_ms, self.max_slow, self._clock = slow_ms, max_slow, clock
 
     def _notify(self, event: str, data: dict[str, Any]) -> None:
         if self._notify_cb:
@@ -211,9 +219,23 @@ class PluginManager:
             hook = getattr(info.module, "on_record", None)
             if not callable(hook) or "journal:read" not in info.manifest.permissions:
                 continue
+            started = self._clock()
             try:
                 hook(record)
             except Exception as exc:
                 self.disable(info.id)
                 info.state, info.error = PluginState.ERROR, f"on_record: {type(exc).__name__}: {exc}"
+                self._notify("plugin_error", {"plugin": info.id, "error": info.error})
+                continue
+            elapsed_ms = (self._clock() - started) * 1000
+            if elapsed_ms <= self.slow_ms:
+                info.slow_calls = 0
+                continue
+            info.slow_calls += 1
+            self._notify("plugin_slow", {"plugin": info.id, "ms": round(elapsed_ms, 1), "seguidas": info.slow_calls})
+            if info.slow_calls >= self.max_slow:
+                self.disable(info.id)
+                info.state = PluginState.ERROR
+                info.error = (f"desativado: {info.slow_calls} chamadas seguidas de on_record acima de "
+                              f"{self.slow_ms:g} ms (travaria a interface)")
                 self._notify("plugin_error", {"plugin": info.id, "error": info.error})

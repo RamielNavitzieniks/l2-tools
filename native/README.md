@@ -1,4 +1,4 @@
-# L2-Tools Native (experimentos 020, 021 e 023)
+# L2-Tools Native (experimentos 020, 021, 023 e 024)
 
 Motor **independente** de automação para Lineage II, com scripts escritos diretamente em Python. Não depende do Adrenaline nem do interpretador Pascal.
 
@@ -85,6 +85,9 @@ python -m l2native run --script scripts/circular_patrol.py --adapter mock --scen
 # D: caminhar pelo menor caminho de uma rota própria (fixtures/route_demo.json), ida e volta
 python -m l2native run --script scripts/route_walker.py --adapter mock --scenario fixtures/route_world.json --param goal=7 --param loop=true
 
+# E: caçador com as políticas do perfil (Relaxar, Cura, Ataque, Busca de alvo, Zona, Morte) em combate SIMULADO
+python -m l2native run --script scripts/hunter.py --adapter mock --scenario fixtures/hunt_world.json
+
 # LiveAdapter: encerra com código 3 e a mensagem "não implementado"
 python -m l2native run --script scripts/quest_watch.py --adapter live
 ```
@@ -117,7 +120,7 @@ cd native
 python -m unittest discover -s tests -t . -v
 ```
 
-São 117 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt` e `requirements-gui.txt`. A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
+São 127 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt` e `requirements-gui.txt`. A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
 
 ## Arquitetura
 
@@ -140,13 +143,14 @@ Adapter -->|  GameState -> script decide -> intenções  -> parâmetros -> só s
 | `script.py` | Carregamento por `importlib` e validação do contrato. |
 | `journal.py` | Registro estruturado, em memória e opcionalmente em JSONL. |
 | `geometry.py` | Fórmulas portadas dos experimentos 015–017. |
-| `adapters/` | `ReplayAdapter`, `MockAdapter`, `VisualAdapter` e `LiveAdapter` (não implementado). |
+| `adapters/` | `ReplayAdapter`, `MockAdapter` (com combate simulado opcional em `simcombat.py`), `VisualAdapter` e `LiveAdapter` (não implementado). |
 | `vision/` | `TemplateDetector` (OpenCV) e as capturas `SequenceCapture` / `WindowClientCapture`. |
 | `session.py` | Motor numa thread de trabalho, com estados (ocioso, executando, pausado, parando, parado, falhou) e eventos para a GUI. |
 | `rules.py` | `Condition` e `Rule` tipadas, com avaliação em três valores, `FilterRule` e `RuleEngine` (prioridade, atraso, intervalo; só decide, não executa). |
 | `profile.py` | Seções tipadas (UX-001), perfil por personagem versionado (`l2tools-profile/2`, migração da v1), catálogo de habilidades, importação e exportação sem credenciais, e comparação de alterações. |
 | `catalog.py` | Catálogo de entidades vistas na sessão, separado do `GameState` do ciclo. |
 | `routes.py` | `RouteGraph` (`l2tools-route/1`, `provenance` obrigatória) e menor caminho. |
+| `policies.py` | `PolicyRunner`: executa as seções do perfil como intenções (exp. 024); só o Simulado tem backend. |
 | `observation.py` | Conjunto mínimo de observações e `ObservationMonitor` (cobertura, proveniência, erros e latência). |
 | `plugins.py` | `PluginManager`: manifesto, API versionada, permissões e ciclo de vida com confirmação. |
 | `mapping.py` | Transformação mundo ↔ tela do mapa XY (zoom ancorado, enquadramento, grade). |
@@ -180,7 +184,7 @@ def on_stop(bot, reason): ...   # opcional
 `bot` oferece:
 
 - **Percepção.** `bot.perception` traz `quest_dialog_visible()`, `quest_dialog_unknown()`, `position()`, `characters_known()`, `character(nome)`, `fact(campo)` e `.state` (o `GameState` completo, com Facts).
-- **Ações.** `bot.actions` traz `move_to`, `move_to_position`, `follow`, `select_target`, `attack`, `use_skill`, `teleport`, `pause` e `stop`. Cada uma só **enfileira** uma intenção.
+- **Ações.** `bot.actions` traz `move_to`, `move_to_position`, `follow`, `select_target(name|npc_id|object_id)`, `attack`, `use_skill`, `teleport`, `rest(sit)`, `pause` e `stop`. Cada uma só **enfileira** uma intenção.
 - **Atalhos.** `bot.pause_for_manual_interaction(reason, resume_on="dialog_closed"|"operator")`, `bot.pause_if_quest_dialog()` e `bot.stop(reason)`.
 - **Estado.** `bot.memory` (dicionário preservado entre ciclos e pausas), `bot.params`, `bot.tick`, `bot.last_results` (resultados do ciclo anterior), `bot.capabilities` e `bot.log(msg, **dados)`.
 
@@ -214,7 +218,7 @@ Só `completed` e `dispatched` contam como sucesso.
 | Adaptador | Observa | Executa |
 | --- | --- | --- |
 | `ReplayAdapter` | JSONL; campo ausente ou `null` = desconhecido; aceita Facts explícitos (`{"status": "inferred", ...}`) | nada (`unsupported`) |
-| `MockAdapter` | mundo simulado: posição própria, waypoints de outras personagens e fatos por ciclo; falhas injetáveis | `move_to` (`dispatched`); o restante, `unsupported` |
+| `MockAdapter` | mundo simulado: posição própria, waypoints de outras personagens e fatos por ciclo; falhas injetáveis. Com o bloco `combat`: HP/MP, NPCs (com `object_id`), alvo e combate | `move_to` (`dispatched`). Com `combat`: `select_target`, `attack`, `use_skill` e `rest`, com fórmulas inventadas. O restante fica `unsupported` |
 | `VisualAdapter` | apenas `quest_dialog`, com a confiança do casamento visual; falha de captura = desconhecido | nada |
 | `LiveAdapter` | **não implementado** (`AdapterUnavailable`) | nada |
 
@@ -227,6 +231,8 @@ Só `completed` e `dispatched` contam como sucesso.
 - perfis versionados com migração, regras, filtros e catálogo de habilidades (configuração; o `RuleEngine` só mostra a decisão);
 - catálogo de entidades, contrato de observação mínima e mapa em camadas;
 - editor de rotas e caminhada pelo menor caminho no simulado;
+- execução simulada das políticas Relaxar, Cura própria, Buff, Ataque, Busca de alvo (com Filtro), Zona e Personagem morreu (`hunter.py`);
+- desativação automática de plugins lentos (> 50 ms em 3 chamadas seguidas);
 - gerenciador de plugins, com plugin de exemplo;
 - motor completo;
 - carregamento e validação de scripts;
@@ -246,9 +252,9 @@ Só `completed` e `dispatched` contam como sucesso.
 - detector visual com um modelo real do cliente Kain;
 - captura de janela no Windows, implementada mas não executada;
 - combate, áreas ocupadas, recuperação e coordenação de grupo;
-- execução das políticas configuradas (cura, buff, ataque, busca de alvo, drop): o `RuleEngine` decide, mas nenhuma decisão vira intenção;
+- execução das políticas **fora do Simulado**, e de Drop e Cura-buff do grupo mesmo no Simulado;
 - qualquer fonte que cumpra o contrato de observação mínima: nenhuma cumpre hoje;
-- GUI aberta em Windows real por uma pessoa: a CI só testa offscreen;
+- GUI aberta em Windows real por uma pessoa: a CI só testa offscreen. Ver `../docs/validacao/gui-windows-checklist.md`;
 - depuração passo a passo, breakpoints e várias abas de arquivo no editor.
 
 ## Limitações conhecidas

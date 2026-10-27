@@ -47,6 +47,7 @@ def parse_entity(raw: Any, source: str) -> Entity:
     return Entity(
         name=raw.get("name"),
         npc_id=raw.get("npc_id"),
+        object_id=raw.get("object_id"),
         position=parse_fact(raw.get("position"), source, parse_position),
         dead=parse_fact(raw.get("dead"), source, bool),
     )

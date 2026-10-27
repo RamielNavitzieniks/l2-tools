@@ -135,7 +135,9 @@ class MainWindowTest(GuiTestCase):
         w.load_example("scripts/follow_sarynne.py", SourceKind.MOCK, "fixtures/follow_world.json")
         w.start_session()
         self.run_to_end()
-        self.assertEqual(w.session.params, {"leader": "Sarynne", "distance": 300})
+        params = dict(w.session.params)
+        self.assertEqual(params.pop("profile")["values"]["grupo"]["follow_distance"], 300)
+        self.assertEqual(params, {"leader": "Sarynne", "distance": 300})
         self.assertEqual(w.players.item(0, 0).text(), "Sarynne")
         self.assertEqual(w.npcs.message, "lista desconhecida (a fonte nao fornece)")
 
@@ -373,6 +375,32 @@ class Registro022GuiTest(GuiTestCase):
         self.assertEqual(w.show_shortest_path(1, 7), [1, 5, 4, 7])
         self.assertEqual(w.map.route_path, [1, 5, 4, 7])
         self.assertIn("1366", w.statusBar().currentMessage())
+        w.map.grab()
+
+
+class Registro021PoliciesGuiTest(GuiTestCase):
+    def test_hunter_example_runs_policies_in_simulation(self):
+        from l2native.gui.config import ConfigDialog, section_status
+        from l2native.profile import SECTION_BY_KEY
+        w = self.win
+        w.profile.save(w.profile_path)
+        w.load_example("scripts/hunter.py", SourceKind.MOCK, "fixtures/hunt_world.json")
+        self.assertIn("Perfil do exemplo", self.answers)
+        self.assertTrue((self.cfg / "profile.anterior.json").is_file())
+        self.assertEqual(w.profile.name, "cacador-simulado")
+        w.profile.values["geral"]["tick_interval_ms"] = 5      # o perfil do exemplo usa 200 ms
+        w.start_session()
+        self.run_to_end()
+        self.assertIn("3 alvos derrotados", w.session.report.reason)
+        self.assertEqual(w.capabilities.status_of(ActionKind.REST), "Simulacao")
+        self.assertEqual(w.capabilities.status_of(ActionKind.ATTACK), "Simulacao")
+        self.assertEqual(w.catalog.rowCount(), 4)      # NPCs por tipo (Lobo, Guarda, Urso) + a jogadora Andarilha
+        logs = [r[3] for r in w.events.model.rows if r[2] == "script_log"]
+        self.assertTrue(any("relaxar: sentar" in m for m in logs))
+        caps = w.capabilities.capabilities
+        self.assertIn("Simulacao", section_status(SECTION_BY_KEY["cura.relaxar"], "mock", caps))
+        dlg = ConfigDialog(w.profile, "mock", caps, parent=w)
+        self.assertEqual(dlg.rule_tables["ataque"].table.item(0, 7).text(), "900002")
         w.map.grab()
 
 

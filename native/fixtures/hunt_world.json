@@ -1,0 +1,123 @@
+{
+  "_comment": "Mundo SIMULADO de combate para hunter.py: nomes e IDs ficticios; formulas de dano/regeneracao inventadas (simcombat.py). Janela de missao no ciclo 40, fecha no 43.",
+  "self": {
+    "position": [
+      1000,
+      2000,
+      -3100
+    ],
+    "speed": 80
+  },
+  "characters": {
+    "Andarilha": {
+      "path": [
+        [
+          2300,
+          2650,
+          -3100
+        ]
+      ],
+      "speed": 0
+    }
+  },
+  "facts_at": {
+    "40": {
+      "quest_dialog": true
+    },
+    "43": {
+      "quest_dialog": false
+    }
+  },
+  "capabilities": [
+    "move_to",
+    "select_target",
+    "attack",
+    "use_skill",
+    "rest"
+  ],
+  "ticks": 800,
+  "combat": {
+    "hp": 0.6,
+    "mp": 0.5,
+    "regen": [
+      0.002,
+      0.004
+    ],
+    "rest_regen": [
+      0.04,
+      0.05
+    ],
+    "attack_range": 600,
+    "attack_damage": 0.07,
+    "skills": {
+      "900001": {
+        "name": "Cura Leve",
+        "mp": 0.1,
+        "heal": 0.3
+      },
+      "900002": {
+        "name": "Golpe Forte",
+        "mp": 0.08,
+        "damage": 0.35,
+        "range": 600
+      }
+    },
+    "npcs": [
+      {
+        "name": "Lobo",
+        "npc_id": 920001,
+        "position": [
+          1500,
+          2100,
+          -3100
+        ],
+        "damage": 0.05,
+        "respawn": 40
+      },
+      {
+        "name": "Lobo",
+        "npc_id": 920001,
+        "position": [
+          900,
+          2900,
+          -3100
+        ],
+        "damage": 0.05,
+        "respawn": 40
+      },
+      {
+        "name": "Lobo",
+        "npc_id": 920001,
+        "position": [
+          2200,
+          2600,
+          -3100
+        ],
+        "damage": 0.05,
+        "respawn": 40
+      },
+      {
+        "name": "Guarda",
+        "npc_id": 920002,
+        "position": [
+          1150,
+          2150,
+          -3100
+        ],
+        "damage": 0.2,
+        "respawn": 40
+      },
+      {
+        "name": "Urso",
+        "npc_id": 920003,
+        "position": [
+          5200,
+          5200,
+          -3100
+        ],
+        "damage": 0.08,
+        "respawn": 40
+      }
+    ]
+  }
+}

@@ -71,8 +71,9 @@ class Actions:
     def follow(self, character: str, distance: float) -> Intent:
         return self._enqueue(ActionKind.FOLLOW, {"character": character, "distance": distance})
 
-    def select_target(self, name: Optional[str] = None, npc_id: Optional[int] = None) -> Intent:
-        params = {k: v for k, v in (("name", name), ("npc_id", npc_id)) if v is not None}
+    def select_target(self, name: Optional[str] = None, npc_id: Optional[int] = None,
+                      object_id: Optional[int] = None) -> Intent:
+        params = {k: v for k, v in (("name", name), ("npc_id", npc_id), ("object_id", object_id)) if v is not None}
         return self._enqueue(ActionKind.SELECT_TARGET, params)
 
     def attack(self) -> Intent:
@@ -83,6 +84,9 @@ class Actions:
 
     def teleport(self, destination_id: int) -> Intent:
         return self._enqueue(ActionKind.TELEPORT, {"destination_id": destination_id})
+
+    def rest(self, sit: bool = True) -> Intent:
+        return self._enqueue(ActionKind.REST, {"sit": sit})
 
     def pause(self, reason: str, resume_on: str = "dialog_closed") -> Intent:
         return self._enqueue(ActionKind.PAUSE, {"reason": reason, "resume_on": resume_on})

@@ -2,8 +2,9 @@
 
 Simula apenas o necessario: a propria personagem anda em linha reta ate o
 ultimo destino de `move_to` a `speed` unidades por ciclo; outras personagens
-percorrem waypoints; fatos arbitrarios mudam em ciclos definidos. Nao modela
-terreno, colisao, latencia nem regras do servidor.
+percorrem waypoints; fatos arbitrarios mudam em ciclos definidos. Com um bloco
+`combat` no cenario, simula tambem HP/MP, NPCs, alvo e combate (simcombat.py).
+Nao modela terreno, colisao, latencia nem regras do servidor.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from ..actions import ActionKind, ActionResult, Intent, ResultStatus
 from ..model import Entity, GameState, Position, observed
 from .base import AdapterError, SourceExhausted
 from .replay import parse_fact, parse_position
+from .simcombat import CombatWorld
 
 _PARSERS: dict[str, Callable[[Any], Any]] = {
     "hp": float, "mp": float, "level": int, "exp": float, "target": str,
@@ -65,6 +67,7 @@ class MockAdapter:
         ticks: Optional[int] = None,
         fail_observe_ticks: Iterable[int] = (),
         execute_hook: Optional[Callable[[Intent], Any]] = None,
+        combat: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self._position = self_position
         self._speed = speed
@@ -80,6 +83,7 @@ class MockAdapter:
         self._ticks = ticks
         self._fail_observe = set(fail_observe_ticks)
         self._execute_hook = execute_hook
+        self.combat = CombatWorld(combat, parse_position) if combat is not None else None
         self.tick = 0
         self.executed: list[Intent] = []
         self.closed = False
@@ -88,7 +92,8 @@ class MockAdapter:
     def from_scenario(cls, path: Path | str) -> "MockAdapter":
         """Cenario JSON: {"self": {"position": [x,y,z], "speed": n},
         "characters": {"Nome": {"path": [[x,y,z], ...], "speed": n}},
-        "facts_at": {"10": {"quest_dialog": true}}, "capabilities": ["move_to"], "ticks": 200}"""
+        "facts_at": {"10": {"quest_dialog": true}}, "capabilities": ["move_to"], "ticks": 200,
+        "combat": {...}}  (opcional; ver simcombat.CombatWorld)"""
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         me = data.get("self", {})
         return cls(
@@ -101,6 +106,7 @@ class MockAdapter:
             facts_at=data.get("facts_at"),
             capabilities=[ActionKind(c) for c in data.get("capabilities", ["move_to"])],
             ticks=data.get("ticks"),
+            combat=data.get("combat"),
         )
 
     @property
@@ -115,6 +121,8 @@ class MockAdapter:
             raise AdapterError(f"falha simulada de observacao no ciclo {self.tick}")
         if self._position is not None and self._destination is not None and self._speed > 0:
             self._position = step_towards(self._position, self._destination, self._speed)
+        if self.combat is not None:
+            self.combat.step(self.tick, self._position)
         for walker in self._walkers.values():
             walker.advance()
         self._facts.update(self._facts_at.get(self.tick, {}))
@@ -123,6 +131,8 @@ class MockAdapter:
         facts = {key: parse_fact(raw, src, _PARSERS[key]) for key, raw in self._facts.items()}
         chars = tuple(Entity(name=n, position=observed(w.position, src), dead=observed(False, src))
                       for n, w in self._walkers.items())
+        if self.combat is not None:
+            facts.update(self.combat.facts(src))
         return GameState(
             tick=self.tick,
             self_position=observed(self._position, src) if self._position else parse_fact(None, src),
@@ -134,6 +144,8 @@ class MockAdapter:
         fields = {"characters", "quest_dialog"} | {k for changes in self._facts_at.values() for k in changes}
         if self._position is not None:
             fields.add("self_position")
+        if self.combat is not None:
+            fields |= {"hp", "mp", "target", "in_combat", "npcs"}
         return frozenset(fields)
 
     def capabilities(self) -> frozenset[ActionKind]:
@@ -143,7 +155,14 @@ class MockAdapter:
         self.executed.append(intent)
         if self._execute_hook is not None:
             return self._execute_hook(intent)
+        if self.combat is not None:
+            result = self.combat.execute(intent, self._position, self.tick)
+            if result is not None:
+                return result
         if intent.kind is ActionKind.MOVE_TO:
+            blocked = self.combat.blocks_movement() if self.combat is not None else None
+            if blocked:
+                return ActionResult(intent, ResultStatus.FAILED, blocked)
             p = intent.params
             self._destination = Position(p["x"], p["y"], p["z"])
             return ActionResult(intent, ResultStatus.DISPATCHED, "destino aceito pelo simulador")

@@ -34,7 +34,9 @@ EXAMPLES = (
     ("Seguir Sarynne (simulado)", "scripts/follow_sarynne.py", SourceKind.MOCK, "fixtures/follow_world.json"),
     ("Patrulha circular (simulado)", "scripts/circular_patrol.py", SourceKind.MOCK, "fixtures/patrol_world.json"),
     ("Caminhar por rota (simulado)", "scripts/route_walker.py", SourceKind.MOCK, "fixtures/route_world.json"),
+    ("Cacador com politicas (simulado)", "scripts/hunter.py", SourceKind.MOCK, "fixtures/hunt_world.json"),
 )
+EXAMPLE_HUNT_PROFILE = "fixtures/profiles/cacador_simulado.json"
 EXAMPLE_ROUTE = "fixtures/route_demo.json"   # rota padrao do route_walker, mostrada no mapa
 STATUS_TEXT = {
     None: "Ocioso", SessionStatus.IDLE: "Ocioso", SessionStatus.RUNNING: "Executando", SessionStatus.PAUSED: "Pausado",
@@ -179,6 +181,8 @@ class MainWindow(QMainWindow):
 
     def _plugin_event(self, event: str, data: dict) -> None:
         self.events.add(Record(0, 0, event, data))
+        if event == "plugin_error":
+            self.plugin_panel.refresh()
 
     # --- barra de ferramentas e menus ---------------------------------------------
     def _build_toolbar(self) -> None:
@@ -284,6 +288,13 @@ class MainWindow(QMainWindow):
         self.set_source(kind, NATIVE_DIR / source)
         if script.endswith("route_walker.py") and self._may_discard_route():
             self.load_route(NATIVE_DIR / (self.profile.values["rota"]["route_file"] or EXAMPLE_ROUTE))
+        if script.endswith("hunter.py") and self.confirm(
+                "Perfil do exemplo", "Usar o perfil sintetico do cacador (regras, catalogo, filtros e zona)? "
+                "O perfil atual e guardado como profile.anterior.json."):
+            if self.profile_path.is_file():
+                backup = self.profile_path.with_name("profile.anterior.json")
+                backup.write_bytes(self.profile_path.read_bytes())
+            self.apply_profile(Profile.load(NATIVE_DIR / EXAMPLE_HUNT_PROFILE))
         self.tabs.setCurrentWidget(self.map)
 
     def _may_discard_script(self) -> bool:
@@ -334,8 +345,10 @@ class MainWindow(QMainWindow):
         g = self.profile.values["geral"]
         config = EngineConfig(tick_interval=g["tick_interval_ms"] / 1000, max_move_distance=g["max_move_distance"],
                               max_consecutive_script_errors=g["max_script_errors"])
+        # o perfil inteiro vai junto: hunter.py executa as politicas dele (no Simulado)
+        params = {**self.profile.script_params(), "profile": self.profile.to_dict()}
         self.session = Session(self.source_kind, self.source_path, self.editor.path,
-                               params=self.profile.script_params(), config=config)
+                               params=params, config=config)
         self.session.subscribe(self.bridge.listener)
         self.map.reset()
         self.character.clear()

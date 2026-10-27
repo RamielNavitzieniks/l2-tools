@@ -19,6 +19,7 @@ class ActionKind(str, Enum):
     ATTACK = "attack"
     USE_SKILL = "use_skill"
     TELEPORT = "teleport"
+    REST = "rest"     # sentar (sit=True) / levantar (sit=False) para recuperar HP/MP
     PAUSE = "pause"   # tratada pelo motor, nunca enviada ao adaptador
     STOP = "stop"     # tratada pelo motor, nunca enviada ao adaptador
 
@@ -90,10 +91,11 @@ _SCHEMAS: dict[ActionKind, tuple[set[str], set[str]]] = {
     # tipo: (obrigatorios, opcionais)
     ActionKind.MOVE_TO: ({"x", "y", "z"}, set()),
     ActionKind.FOLLOW: ({"character", "distance"}, set()),
-    ActionKind.SELECT_TARGET: (set(), {"name", "npc_id"}),
+    ActionKind.SELECT_TARGET: (set(), {"name", "npc_id", "object_id"}),
     ActionKind.ATTACK: (set(), set()),
     ActionKind.USE_SKILL: ({"skill_id"}, set()),
     ActionKind.TELEPORT: ({"destination_id"}, set()),
+    ActionKind.REST: ({"sit"}, set()),
     ActionKind.PAUSE: ({"reason"}, {"resume_on"}),
     ActionKind.STOP: ({"reason"}, set()),
 }
@@ -116,16 +118,20 @@ def validate_params(kind: ActionKind, params: Mapping[str, Any]) -> list[str]:
         if checks[1] is None and params["distance"] <= 0:
             checks.append("'distance' deve ser positiva")
     elif kind is ActionKind.SELECT_TARGET:
-        if "name" not in params and "npc_id" not in params:
-            checks.append("informe 'name' ou 'npc_id'")
+        if not params.keys() & {"name", "npc_id", "object_id"}:
+            checks.append("informe 'name', 'npc_id' ou 'object_id'")
         if "name" in params:
             checks.append(_text(params, "name"))
-        if "npc_id" in params:
-            checks.append(_positive_int(params, "npc_id"))
+        for key in ("npc_id", "object_id"):
+            if key in params:
+                checks.append(_positive_int(params, key))
     elif kind is ActionKind.USE_SKILL:
         checks = [_positive_int(params, "skill_id")]
     elif kind is ActionKind.TELEPORT:
         checks = [_positive_int(params, "destination_id")]
+    elif kind is ActionKind.REST:
+        if not isinstance(params["sit"], bool):
+            checks.append("'sit' deve ser booleano")
     elif kind is ActionKind.PAUSE:
         checks = [_text(params, "reason")]
         if params.get("resume_on", "dialog_closed") not in RESUME_POLICIES:

@@ -215,8 +215,9 @@ class MapView(QWidget):
                     if not e.position.known:
                         continue
                     v = self._v(e.position.value)
-                    painter.setPen(QPen(QColor(color), 1))
-                    painter.setBrush(QColor(color))
+                    c = "#9e9e9e" if e.dead.is_true() else color
+                    painter.setPen(QPen(QColor(c), 1))
+                    painter.setBrush(QColor(c))
                     painter.drawEllipse(v, 4, 4)
                     painter.setPen(text_color)
                     painter.drawText(v + QPointF(6, -6), e.name or (str(e.npc_id) if e.npc_id else "?"))

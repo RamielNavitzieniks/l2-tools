@@ -110,13 +110,13 @@ SECTIONS: tuple[Section, ...] = (
         S("stand_mp_above", "Levantar com MP acima de (%)", "int", 95, 0, 100),
         S("idle_without_target_s", "Descansar apos sem alvo (s)", "int", 0, 0, 3600),
         S("rest_point", "Ponto de descanso (x, y, z)", "position", None),
-    ), needs=(ActionKind.MOVE_TO,), note="Nao ha acao 'sentar' no contrato: recuperacao ainda nao executavel."),
+    ), needs=(ActionKind.REST,), note="Executado pela PolicyRunner (hunter.py) com a acao 'rest'; so o Simulado a implementa."),
     Section("cura.morte", "Personagem morreu", parent="cura", settings=(
         S("wait_respawn_s", "Aguardar ressurreicao (s)", "int", 0, 0, 3600),
         S("wait_party", "Aguardar grupo", "bool", False),
         S("fallback", "Se ninguem ressuscitar", "choice", "parar", choices=("parar", "ir_para_cidade")),
         S("pause_after_res_s", "Pausa apos ressuscitar (s)", "int", 5, 0, 600),
-    ), needs=(ActionKind.TELEPORT,), note="Politica registrada; nenhuma acao de morte e executada."),
+    ), needs=(ActionKind.TELEPORT,), note="PolicyRunner: 'parar' encerra o script; 'ir_para_cidade' pausa para o operador (teleporte sem backend)."),
     Section("buff", "Buff proprio", rules=True, needs=(ActionKind.USE_SKILL,)),
     Section("grupo_cura", "Cura-buff do grupo", rules=True, settings=(
         S("radius", "Raio de atuacao", "int", 900, 0, 5000),
@@ -142,7 +142,8 @@ SECTIONS: tuple[Section, ...] = (
         S("players_radius", "Raio de jogadores", "int", 500, 0, 5000),
         S("hp_unchanged_s", "Trocar alvo se HP nao mudar (s)", "int", 10, 0, 600),
         S("max_level_diff", "Diferenca maxima de nivel", "int", 10, 0, 100),
-    ), needs=(ActionKind.SELECT_TARGET,), note="O painel deve explicar por que um alvo foi descartado."),
+    ), needs=(ActionKind.SELECT_TARGET, ActionKind.MOVE_TO),
+        note="PolicyRunner: cada alvo descartado e registrado com o motivo (evento script_log)."),
     Section("alvo.filtro", "Filtro", parent="alvo", filter_actions=("atacar", "ignorar", "revidar"),
             needs=(ActionKind.SELECT_TARGET,)),
     Section("zona", "Zona de combate", settings=(
