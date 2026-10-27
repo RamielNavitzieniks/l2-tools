@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .model import GameState
 
@@ -127,8 +127,8 @@ class Rule:
     delay_ms: int = 0
     interval_ms: int = 0
     enabled: bool = True
-    game_id: Optional[int] = None   # ID de habilidade/item SO quando confirmado no cliente
     conditions: tuple[Condition, ...] = field(default_factory=tuple)
+    # O ID no jogo NAO fica na regra: vem do catalogo de habilidades do perfil (pelo nome).
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -139,9 +139,6 @@ class Rule:
             v = getattr(self, key)
             if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 raise ValueError(f"{key} deve ser inteiro >= 0")
-        if self.game_id is not None and (isinstance(self.game_id, bool) or not isinstance(self.game_id, int)
-                                         or self.game_id <= 0):
-            raise ValueError("game_id deve ser inteiro positivo ou vazio")
 
     def evaluate(self, state: GameState) -> Optional[bool]:
         """E logico das condicoes: False se alguma e falsa; None se alguma e
@@ -158,13 +155,15 @@ class Rule:
     def to_dict(self) -> dict[str, Any]:
         return {"kind": self.kind.value, "name": self.name, "target": self.target.value,
                 "priority": self.priority, "delay_ms": self.delay_ms, "interval_ms": self.interval_ms,
-                "enabled": self.enabled, "game_id": self.game_id,
+                "enabled": self.enabled,
                 "conditions": [c.to_dict() for c in self.conditions]}
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Rule":
+        if "game_id" in d:
+            raise ValueError("regra com game_id: formato v1, carregue pelo Profile para migrar")
         return cls(RuleKind(d["kind"]), d["name"], TargetKind(d.get("target", "self")), d.get("priority", 50),
-                   d.get("delay_ms", 0), d.get("interval_ms", 0), d.get("enabled", True), d.get("game_id"),
+                   d.get("delay_ms", 0), d.get("interval_ms", 0), d.get("enabled", True),
                    tuple(Condition.from_dict(c) for c in d.get("conditions", [])))
 
 
@@ -203,3 +202,88 @@ class FilterRule:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "FilterRule":
         return cls(d["action"], d.get("name", ""), d.get("game_id"), d.get("priority", 50))
+
+
+# --- motor de regras (decisao apenas) -------------------------------------------
+class DecisionStatus(str, Enum):
+    READY = "pronta"
+    WAITING_DELAY = "aguardando atraso"
+    COOLDOWN = "em intervalo"
+    NO_ID = "sem ID confirmado"
+    FALSE = "condicao falsa"
+    UNKNOWN = "condicao desconhecida"
+    DISABLED = "desativada"
+
+
+@dataclass(frozen=True)
+class RuleDecision:
+    section: str
+    rule: Rule
+    status: DecisionStatus
+    game_id: Optional[int] = None
+    wait_ms: int = 0
+
+
+class RuleEngine:
+    """Decide, por secao, qual regra estaria pronta agora. NAO executa nada:
+    quem consome decide se transforma a decisao em intencao (e so ha backend
+    simulado ou nenhum). Ordem: prioridade maior primeiro; empate = ordem da tabela.
+
+    - delay_ms: a condicao precisa ficar verdadeira por esse tempo seguido;
+    - interval_ms: tempo minimo entre dois usos (registrados com mark_used);
+    - sem ID confirmado no catalogo a regra nunca fica pronta.
+    """
+
+    def __init__(self, resolve_game_id: Callable[[Rule], Optional[int]]) -> None:
+        self._resolve = resolve_game_id
+        self._true_since: dict[tuple[str, str], int] = {}
+        self._last_used: dict[tuple[str, str], int] = {}
+
+    def decide(self, section: str, rules: list[Rule], state: GameState, now_ms: int) -> list[RuleDecision]:
+        out = []
+        for rule in ordered(rules):
+            key = (section, rule.name.casefold())
+            truth = rule.evaluate(state)
+            if truth is True:
+                self._true_since.setdefault(key, now_ms)
+            else:
+                self._true_since.pop(key, None)
+            gid = self._resolve(rule)
+            if not rule.enabled:
+                status = DecisionStatus.DISABLED
+            elif truth is None:
+                status = DecisionStatus.UNKNOWN
+            elif truth is False:
+                status = DecisionStatus.FALSE
+            elif gid is None:
+                status = DecisionStatus.NO_ID
+            else:
+                waited = now_ms - self._true_since[key]
+                since_use = now_ms - self._last_used[key] if key in self._last_used else None
+                if since_use is not None and since_use < rule.interval_ms:
+                    out.append(RuleDecision(section, rule, DecisionStatus.COOLDOWN, gid, rule.interval_ms - since_use))
+                    continue
+                if waited < rule.delay_ms:
+                    out.append(RuleDecision(section, rule, DecisionStatus.WAITING_DELAY, gid, rule.delay_ms - waited))
+                    continue
+                status = DecisionStatus.READY
+            out.append(RuleDecision(section, rule, status, gid))
+        return out
+
+    @staticmethod
+    def chosen(decisions: list[RuleDecision]) -> Optional[RuleDecision]:
+        return next((d for d in decisions if d.status is DecisionStatus.READY), None)
+
+    def mark_used(self, section: str, rule: Rule, now_ms: int) -> None:
+        self._last_used[(section, rule.name.casefold())] = now_ms
+
+
+def state_time_ms(state: GameState, fallback_tick_ms: int = 500) -> int:
+    """Tempo do estado em ms: timestamp ISO-8601 quando existe; senao, ciclo x passo simulado."""
+    if state.timestamp:
+        try:
+            from datetime import datetime
+            return int(datetime.fromisoformat(state.timestamp.replace("Z", "+00:00")).timestamp() * 1000)
+        except ValueError:
+            pass
+    return state.tick * fallback_tick_ms

@@ -226,8 +226,9 @@ class ConfigDialogTest(GuiTestCase):
         from l2native.gui.config import ConfigDialog
         w = self.win
         dlg = ConfigDialog(w.profile, "mock", frozenset({ActionKind.MOVE_TO}), parent=w)
+        from l2native.gui.config import SKILLS_PAGE
         from l2native.profile import SECTIONS
-        self.assertEqual(set(dlg.page_index), {s.key for s in SECTIONS})
+        self.assertEqual(set(dlg.page_index), {s.key for s in SECTIONS} | {SKILLS_PAGE})
         status = dlg.pages.widget(dlg.page_index["ataque"]).findChild(type(dlg.error), "status_ataque")
         self.assertIn("Nao suportada", status.text())
         status = dlg.pages.widget(dlg.page_index["grupo"]).findChild(type(dlg.error), "status_grupo")
@@ -267,6 +268,112 @@ class ConfigDialogTest(GuiTestCase):
                            Condition(ConditionField.IN_COMBAT, Operator.EQ, True),))], lambda: state)
         self.assertEqual(t.table.item(0, 9).text(), "verdadeira")
         self.assertEqual(t.table.item(1, 9).text(), "desconhecida")
+
+
+class Registro022GuiTest(GuiTestCase):
+    """Experimento 023: catalogo de habilidades, decisoes sem execucao, catalogo de
+    entidades, prontidao de observacao, camadas do mapa e editor de rota."""
+
+    def test_skill_catalog_page_feeds_rule_id_column(self):
+        from l2native.gui.config import ConfigDialog
+        from l2native.profile import SkillEntry
+        dlg = ConfigDialog(self.win.profile, "mock", frozenset({ActionKind.MOVE_TO}), parent=self.win)
+        cura = dlg.rule_tables["cura"]
+        cura.add(Rule(RuleKind.SKILL, "Cura"))
+        self.assertEqual(cura.table.item(0, 7).text(), "nao catalogada")
+        dlg.skill_table.put(SkillEntry("Cura", 7, False))
+        self.assertEqual(cura.table.item(0, 7).text(), "7 (nao confirmado)")
+        dlg.skill_table.name.setText("cura")
+        dlg.skill_table.game_id.setText("7")
+        dlg.skill_table.confirmed.setChecked(True)
+        dlg.skill_table._add_from_fields()
+        self.assertEqual(len(dlg.skill_table.skills), 1)              # mesmo nome: substitui
+        self.assertEqual(cura.table.item(0, 7).text(), "7")
+        dlg.skill_table.name.setText("Outra")
+        dlg.skill_table.game_id.setText("")
+        dlg.skill_table._add_from_fields()                            # confirmada sem ID: recusada
+        self.assertIn("sem ID", dlg.skill_table.error.text())
+        self.assertTrue(any("Catalogo" in c for c in dlg.changes()))
+        dlg.accept()
+        self.assertEqual(dlg.result_profile.resolve_game_id(Rule(RuleKind.SKILL, "Cura")), 7)
+        dlg.import_from(FIXTURES / "profiles" / "exemplo_v1.json")
+        self.assertIn("v1->v2", dlg.info.text())
+        self.assertEqual({s.name for s in dlg.skill_table.skills}, {"Cura Leve", "Golpe Forte"})
+
+    def test_v1_profile_on_disk_is_migrated_with_backup(self):
+        self.win.close()
+        (self.cfg / "profile.json").write_bytes((FIXTURES / "profiles" / "exemplo_v1.json").read_bytes())
+        w = self.new_window()
+        self.assertIn("v1->v2", w.statusBar().currentMessage())
+        self.assertTrue((self.cfg / "profile.v1.json").is_file())
+        self.assertIn("l2tools-profile/2", (self.cfg / "profile.json").read_text(encoding="utf-8"))
+        self.assertEqual(w.profile.skill("Golpe Forte").game_id, 900002)
+
+    def test_decision_panel_marks_chosen_rule_without_executing(self):
+        from l2native.gui.panels import RuleDecisionPanel
+        from l2native.model import GameState, observed
+        from l2native.profile import Profile
+        profile = Profile.load(FIXTURES / "profiles" / "exemplo_v2.json")
+        panel = RuleDecisionPanel()
+        panel.set_profile(profile)
+        panel.update_state(GameState(tick=1, hp=observed(0.3, "t"), in_combat=observed(True, "t"),
+                                     target=observed("Lobo", "t")))
+        rows = dict(zip(panel.column(1), panel.column(4)))
+        self.assertEqual(rows["Cura Leve"], RuleDecisionPanel.CHOSEN)
+        self.assertEqual(rows["Golpe Forte"], RuleDecisionPanel.CHOSEN)
+        self.assertEqual(rows["Golpe Basico"], "sem ID confirmado")
+        panel.update_state(GameState(tick=2, hp=observed(0.3, "t"), in_combat=observed(True, "t"),
+                                     target=observed("Lobo", "t")))
+        self.assertEqual(dict(zip(panel.column(1), panel.column(4)))["Cura Leve"], "em intervalo")
+        panel.update_state(GameState(tick=3))
+        self.assertEqual(set(panel.column(4)), {"condicao desconhecida"})
+
+    def test_route_example_feeds_catalog_observation_and_map(self):
+        from l2native.observation import Requirement
+        w = self.win
+        w.load_example("scripts/route_walker.py", SourceKind.MOCK, "fixtures/route_world.json")
+        self.assertEqual(len(w.map.route.nodes), 7)
+        w.start_session()
+        self.run_to_end()
+        self.assertIn("destino alcancado", w.session.report.reason)
+        self.assertIn("declara", w.observation.declared_label.text())
+        self.assertEqual(w.observation.status_of(Requirement.SELF_POSITION), "atendido")
+        self.assertEqual(w.observation.status_of(Requirement.VITALS), "nao atendido")
+        self.assertEqual(w.catalog.rowCount(), 0)                       # o simulado de rota nao tem entidades
+        w.load_example("scripts/follow_sarynne.py", SourceKind.MOCK, "fixtures/follow_world.json")
+        w.start_session()
+        self.run_to_end()
+        self.assertEqual(w.catalog.column(1), ["Sarynne"])
+        self.assertGreater(int(w.catalog.item(0, 5).text()), 1)
+
+    def test_layers_and_route_editor(self):
+        w = self.win
+        w.layer_actions["grade"].setChecked(False)
+        w.layer_actions["trilha"].setChecked(False)
+        self.assertFalse(w.map.layers["grade"] or w.map.layers["trilha"])
+        w.map.resize(800, 600)
+        w.new_route()
+        self.assertTrue(w.route_edit_action.isChecked())
+        for vx, vy in ((100, 100), (300, 100), (300, 300)):
+            w.map.pick(vx, vy)
+        self.assertEqual(sorted(w.route.nodes), [1, 2, 3])
+        self.assertEqual(w.route.shortest_path(1, 3), [1, 2, 3])
+        w.undo_route_node()
+        self.assertEqual(sorted(w.route.nodes), [1, 2])
+        self.assertEqual(w.route_last, 2)
+        w.map.grab()                                                    # desenha com camadas e rota
+        w.route_edit_action.setChecked(False)
+        w.map.pick(500, 500)
+        self.assertEqual(len(w.route.nodes), 2)                         # fora do modo de edicao nao adiciona
+        out = self.cfg / "minha_rota.json"
+        w.save_route(out)
+        self.assertEqual(w.profile.get("rota", "route_file"), str(out))
+        self.assertFalse(w.route_dirty)
+        self.assertTrue(w.load_route(FIXTURES / "route_demo.json"))
+        self.assertEqual(w.show_shortest_path(1, 7), [1, 5, 4, 7])
+        self.assertEqual(w.map.route_path, [1, 5, 4, 7])
+        self.assertIn("1366", w.statusBar().currentMessage())
+        w.map.grab()
 
 
 if __name__ == "__main__":

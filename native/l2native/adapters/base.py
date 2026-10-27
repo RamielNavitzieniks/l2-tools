@@ -1,7 +1,7 @@
 """Contrato GameAdapter: unica fronteira entre o motor e uma fonte de jogo."""
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 from ..actions import ActionKind, ActionResult, Intent
 from ..model import GameState
@@ -26,6 +26,11 @@ class GameAdapter(Protocol):
     def observe(self) -> GameState:
         """Devolve o estado atual. Pode levantar AdapterError, SourceExhausted
         ou AdapterUnavailable."""
+        ...
+
+    def observes(self) -> Optional[frozenset[str]]:
+        """Campos do GameState que este adaptador se compromete a observar
+        (capacidades de observacao). None = nao declara (depende dos dados)."""
         ...
 
     def capabilities(self) -> frozenset[ActionKind]:

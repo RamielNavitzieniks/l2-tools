@@ -130,6 +130,12 @@ class MockAdapter:
             **facts,
         )
 
+    def observes(self) -> Optional[frozenset[str]]:
+        fields = {"characters", "quest_dialog"} | {k for changes in self._facts_at.values() for k in changes}
+        if self._position is not None:
+            fields.add("self_position")
+        return frozenset(fields)
+
     def capabilities(self) -> frozenset[ActionKind]:
         return self._capabilities
 

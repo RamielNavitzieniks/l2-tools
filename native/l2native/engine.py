@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import io
 import threading
+import time
 import traceback
 from dataclasses import dataclass
 from enum import Enum
@@ -173,8 +174,11 @@ class Engine:
             raise RuntimeError("motor ja iniciado")
         self.capabilities = frozenset(self.adapter.capabilities())
         self.status = EngineStatus.RUNNING
+        observes = getattr(self.adapter, "observes", None)
+        declared = observes() if callable(observes) else None
         self.journal.write(0, "engine_start", script=self.script.name, adapter=self.adapter.name,
-                           capabilities=sorted(k.value for k in self.capabilities))
+                           capabilities=sorted(k.value for k in self.capabilities),
+                           observes=None if declared is None else sorted(declared))
         if self.script.on_start and not self._call_script(self.script.on_start, "on_start"):
             self._finish(EngineStatus.FAILED, "erro em on_start")
             return False
@@ -207,13 +211,15 @@ class Engine:
             self._resume_requested.wait(self.config.pause_poll_interval)
             return True
 
+        started = time.perf_counter()
         state = self._observe()
         if state is None:
             return not self._finished
+        latency_ms = round((time.perf_counter() - started) * 1000, 3)
         self.ticks += 1
         self.bot.tick = state.tick
         self.bot.perception = Perception(state)
-        self.journal.write(state.tick, "observation", state=_summary(state))
+        self.journal.write(state.tick, "observation", state=_summary(state), latency_ms=latency_ms)
 
         self._queue = []  # on_resume e on_tick do mesmo ciclo compartilham a fila
         if self.status is EngineStatus.PAUSED and not self._try_resume(state):

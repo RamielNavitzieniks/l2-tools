@@ -12,10 +12,15 @@ from PySide6.QtWidgets import (QComboBox, QFormLayout, QHBoxLayout, QHeaderView,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..actions import ActionKind, capability_status
+from ..adapters.replay import state_from_dict
+from ..catalog import EntityCatalog
 from ..geometry import distance_xy
 from ..journal import Record
 from ..model import Fact, GameState
+from ..observation import WHY, ObservationMonitor, ReadinessStatus, Requirement
 from ..plugins import PluginManager, PluginState
+from ..profile import SECTIONS, Profile
+from ..rules import RuleDecision, RuleEngine, state_time_ms
 from .common import CATEGORIES, FILTERS, UNKNOWN_TEXT, describe, fact_text
 
 UNKNOWN_STYLE = "color: #8d8d8d; font-style: italic;"
@@ -377,3 +382,133 @@ class PluginPanel(QWidget):
             return False
         self.refresh()
         return True
+
+
+class _Table(QTableWidget):
+    def __init__(self, columns: tuple[str, ...], parent: Optional[QWidget] = None) -> None:
+        super().__init__(0, len(columns), parent)
+        self.setHorizontalHeaderLabels(columns)
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.horizontalHeader().setStretchLastSection(True)
+        self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.verticalHeader().hide()
+
+    def fill(self, rows: list[tuple[str, ...]]) -> None:
+        self.setRowCount(len(rows))
+        for r, cells in enumerate(rows):
+            for c, text in enumerate(cells):
+                self.setItem(r, c, QTableWidgetItem(text))
+
+    def column(self, c: int) -> list[str]:
+        return [self.item(r, c).text() for r in range(self.rowCount())]
+
+
+class RuleDecisionPanel(_Table):
+    """Decisao do RuleEngine a cada observacao, SEM execucao (registro 022).
+    A regra escolhida por secao aparece como 'seria usada (sem execucao)'."""
+    CHOSEN = "seria usada (sem execucao)"
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(("Secao", "Regra", "Prior.", "ID", "Decisao", "Espera (ms)"), parent)
+        self.engine: Optional[RuleEngine] = None
+        self.profile: Optional[Profile] = None
+        self.decisions: list[RuleDecision] = []
+
+    def set_profile(self, profile: Profile) -> None:
+        self.profile = profile
+        self.engine = RuleEngine(profile.resolve_game_id)
+        self.decisions = []
+        self.fill([])
+
+    def update_state(self, state: GameState) -> None:
+        if self.profile is None or self.engine is None:
+            return
+        now = state_time_ms(state)
+        rows, self.decisions = [], []
+        for sec in SECTIONS:
+            if not sec.rules or not self.profile.rules[sec.key]:
+                continue
+            decisions = self.engine.decide(sec.key, self.profile.rules[sec.key], state, now)
+            chosen = RuleEngine.chosen(decisions)
+            if chosen is not None:
+                # simula o uso para que o intervalo apareca no proximo ciclo; nenhuma intencao e gerada
+                self.engine.mark_used(sec.key, chosen.rule, now)
+            for d in decisions:
+                self.decisions.append(d)
+                rows.append((sec.title, d.rule.name, str(d.rule.priority),
+                             "" if d.game_id is None else str(d.game_id),
+                             self.CHOSEN if d is chosen else d.status.value,
+                             str(d.wait_ms) if d.wait_ms else ""))
+        self.fill(rows)
+
+
+class EntityCatalogPanel(_Table):
+    """Entidades ja vistas na sessao (somente memoria)."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(("Tipo", "Nome", "NPC ID", "Primeiro ciclo", "Ultimo ciclo", "Vezes", "Ultima XYZ"), parent)
+        self.catalog = EntityCatalog()
+
+    def clear_catalog(self) -> None:
+        self.catalog.clear()
+        self.fill([])
+
+    def update_state(self, state: GameState) -> None:
+        self.catalog.update(state)
+        rows = []
+        for e in sorted(self.catalog.entries.values(), key=lambda e: (e.kind, (e.name or "").casefold())):
+            pos = "" if e.last_position is None else \
+                f"{e.last_position.x:.0f}, {e.last_position.y:.0f}, {e.last_position.z:.0f}"
+            rows.append(("NPC" if e.kind == "npc" else "Jogador", e.name or "?",
+                         "" if e.npc_id is None else str(e.npc_id), str(e.first_tick), str(e.last_tick),
+                         str(e.sightings), pos))
+        self.fill(rows)
+
+
+class ObservationPanel(QWidget):
+    """Prontidao da fonte contra o conjunto minimo de observacoes."""
+    COLORS = {ReadinessStatus.MET: "#2e7d32", ReadinessStatus.NOT_MET: "#c62828",
+              ReadinessStatus.INSUFFICIENT: "#8d8d8d"}
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.monitor = ObservationMonitor()
+        self.declared_label = QLabel("Adaptador: nenhum")
+        self.declared_label.setWordWrap(True)
+        self.table = _Table(("Requisito", "Estado", "Declarado", "Detalhe"))
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.declared_label)
+        layout.addWidget(self.table)
+        self.refresh()
+
+    def reset(self, adapter: Optional[str] = None, declared: Optional[list[str]] = None) -> None:
+        self.monitor = ObservationMonitor()
+        self.monitor.set_declared(None if declared is None else frozenset(declared))
+        if adapter is None:
+            self.declared_label.setText("Adaptador: nenhum")
+        elif declared is None:
+            self.declared_label.setText(f"Adaptador {adapter}: nao declara campos (medido pelos dados)")
+        else:
+            self.declared_label.setText(f"Adaptador {adapter} declara: {', '.join(declared) or 'nenhum campo'}")
+        self.refresh()
+
+    def on_record(self, record: Record) -> None:
+        if record.event == "observation":
+            self.monitor.feed(state_from_dict(record.data["state"]), record.data.get("latency_ms"))
+        elif record.event == "adapter_error" and not str(record.data.get("error", "")).startswith("close()"):
+            self.monitor.feed_error()
+        else:
+            return
+        self.refresh()
+
+    def status_of(self, req: Requirement) -> str:
+        return next(r.status.value for r in self.monitor.report() if r.requirement is req)
+
+    def refresh(self) -> None:
+        report = self.monitor.report()
+        declared = {None: "-", True: "sim", False: "nao"}
+        self.table.fill([(r.requirement.value, r.status.value, declared[r.declared], r.detail) for r in report])
+        for row, r in enumerate(report):
+            self.table.item(row, 1).setForeground(QColor(self.COLORS[r.status]))
+            self.table.item(row, 0).setToolTip(WHY[r.requirement])

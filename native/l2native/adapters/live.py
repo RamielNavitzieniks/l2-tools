@@ -21,6 +21,9 @@ class LiveAdapter:
     def observe(self) -> GameState:
         raise AdapterUnavailable(REASON)
 
+    def observes(self) -> frozenset[str]:
+        return frozenset()
+
     def capabilities(self) -> frozenset[ActionKind]:
         return frozenset()
 

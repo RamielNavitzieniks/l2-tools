@@ -1,4 +1,4 @@
-# L2-Tools Native (experimentos 020 e 021)
+# L2-Tools Native (experimentos 020, 021 e 023)
 
 Motor **independente** de automação para Lineage II, com scripts escritos diretamente em Python. Não depende do Adrenaline nem do interpretador Pascal.
 
@@ -42,7 +42,10 @@ Para ver funcionando sem o jogo: escolha **Arquivo → Exemplos** e depois **▶
 | Esquerda | **Sessão/Personagem**: nível, HP, MP, EXP, XYZ, alvo, combate e janela de missão, com origem e confiança, ou "desconhecido". **Plugins**. |
 | Direita | **Alvo**, **Jogadores**, **NPCs** e **Drops** (a lista vazia observada é diferente da lista desconhecida) e **Capacidades do adaptador** (Simulação / Disponível / Não suportada / Desconhecida). |
 | Inferior | **Eventos**: hora, ciclo, evento e detalhe, com filtros por categoria e por texto. |
-| Configurações → Perfil e políticas | Árvore de seções do inventário UX-001: Geral, Cura própria (Relaxar, Personagem morreu), Buff próprio, Cura-buff do grupo, Configurações do grupo, Ataque, Busca de alvo (Filtro), Zona de combate e Drop (Filtro). Usa um editor de regras reutilizável com condições tipadas e coluna "Agora" (verdadeira, falsa ou desconhecida). Também importa e exporta o perfil e mostra as alterações. |
+| Configurações → Perfil e políticas | Árvore de seções do inventário UX-001: Geral, Cura própria (Relaxar, Personagem morreu), Buff próprio, Cura-buff do grupo, Configurações do grupo, Ataque, Busca de alvo (Filtro), Zona de combate, Rota e Drop (Filtro), mais o **Catálogo de habilidades** (fonte única dos IDs, casados pelo nome da regra). Usa um editor de regras reutilizável com condições tipadas e colunas "ID (catálogo)" e "Agora" (verdadeira, falsa ou desconhecida). Também importa e exporta o perfil e mostra as alterações. Perfis `v1` são migrados ao carregar. |
+| Inferior, outras abas (exp. 023) | **Decisões de regras (sem execução)**: o que o `RuleEngine` escolheria agora, por seção ("seria usada (sem execução)", aguardando atraso, em intervalo, sem ID confirmado, desconhecida). **Catálogo de entidades**: jogadores e NPCs já vistos na sessão (só em memória). |
+| Direita, aba **Observação mínima** (exp. 023) | Prontidão da fonte em relação ao contrato de `../docs/contratos/observacao-minima.md`: atendido, não atendido ou dados insuficientes, com o que o adaptador declara observar. |
+| Menu **Rota** (exp. 023) | Nova, abrir, salvar como, **Editar rota** (cada clique no mapa adiciona um nó ligado ao anterior), desfazer o último nó, menor caminho entre nós. Visualizar → **Camadas do mapa** liga e desliga grade, trilha, entidades, zona, rota e caminho. |
 
 Regras da interface:
 
@@ -79,6 +82,9 @@ python -m l2native run --script scripts/follow_sarynne.py --adapter mock --scena
 # C: patrulha circular simulada, com pausa de missão no meio
 python -m l2native run --script scripts/circular_patrol.py --adapter mock --scenario fixtures/patrol_world.json --param laps=2
 
+# D: caminhar pelo menor caminho de uma rota própria (fixtures/route_demo.json), ida e volta
+python -m l2native run --script scripts/route_walker.py --adapter mock --scenario fixtures/route_world.json --param goal=7 --param loop=true
+
 # LiveAdapter: encerra com código 3 e a mensagem "não implementado"
 python -m l2native run --script scripts/quest_watch.py --adapter live
 ```
@@ -111,7 +117,7 @@ cd native
 python -m unittest discover -s tests -t . -v
 ```
 
-São 94 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt` e `requirements-gui.txt`. A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
+São 117 testes. Sem `numpy`/`opencv` ou sem `PySide6`, os testes de visão e de GUI são **pulados**, com a mensagem informando o motivo. Para a suíte completa, instale `requirements-vision.txt` e `requirements-gui.txt`. A GUI é testada fora da tela, com `QT_QPA_PLATFORM=offscreen`, que o próprio teste define. Os testes não usam rede nem o jogo. A CI (`.github/workflows/native-tests.yml`) executa a suíte em Ubuntu (Python 3.10 e 3.13) e em Windows (Python 3.12).
 
 ## Arquitetura
 
@@ -137,8 +143,11 @@ Adapter -->|  GameState -> script decide -> intenções  -> parâmetros -> só s
 | `adapters/` | `ReplayAdapter`, `MockAdapter`, `VisualAdapter` e `LiveAdapter` (não implementado). |
 | `vision/` | `TemplateDetector` (OpenCV) e as capturas `SequenceCapture` / `WindowClientCapture`. |
 | `session.py` | Motor numa thread de trabalho, com estados (ocioso, executando, pausado, parando, parado, falhou) e eventos para a GUI. |
-| `rules.py` | `Condition` e `Rule` tipadas, com avaliação em três valores, e `FilterRule`. |
-| `profile.py` | Seções tipadas (UX-001), perfil por personagem, importação e exportação sem credenciais, e comparação de alterações. |
+| `rules.py` | `Condition` e `Rule` tipadas, com avaliação em três valores, `FilterRule` e `RuleEngine` (prioridade, atraso, intervalo; só decide, não executa). |
+| `profile.py` | Seções tipadas (UX-001), perfil por personagem versionado (`l2tools-profile/2`, migração da v1), catálogo de habilidades, importação e exportação sem credenciais, e comparação de alterações. |
+| `catalog.py` | Catálogo de entidades vistas na sessão, separado do `GameState` do ciclo. |
+| `routes.py` | `RouteGraph` (`l2tools-route/1`, `provenance` obrigatória) e menor caminho. |
+| `observation.py` | Conjunto mínimo de observações e `ObservationMonitor` (cobertura, proveniência, erros e latência). |
 | `plugins.py` | `PluginManager`: manifesto, API versionada, permissões e ciclo de vida com confirmação. |
 | `mapping.py` | Transformação mundo ↔ tela do mapa XY (zoom ancorado, enquadramento, grade). |
 | `gui/` | PySide6: `MainWindow`, `MapView`, `ScriptEditor`, painéis e `ConfigDialog`. |
@@ -185,6 +194,7 @@ A retomada de uma pausa acontece quando a janela de missão é **observada fecha
 class GameAdapter(Protocol):
     name: str
     def observe(self) -> GameState            # AdapterError (recuperável), SourceExhausted (fim normal), AdapterUnavailable (fatal)
+    def observes(self) -> frozenset[str] | None   # campos que se compromete a observar; None = não declara
     def capabilities(self) -> frozenset[ActionKind]
     def execute(self, intent: Intent) -> ActionResult   # só recebe intenções válidas e contidas em capabilities()
     def close(self) -> None
@@ -214,7 +224,9 @@ Só `completed` e `dispatched` contam como sucesso.
 
 - interface gráfica, com fontes Replay e Simulado;
 - editor de scripts integrado à interface;
-- perfis, regras e filtros (apenas configuração);
+- perfis versionados com migração, regras, filtros e catálogo de habilidades (configuração; o `RuleEngine` só mostra a decisão);
+- catálogo de entidades, contrato de observação mínima e mapa em camadas;
+- editor de rotas e caminhada pelo menor caminho no simulado;
 - gerenciador de plugins, com plugin de exemplo;
 - motor completo;
 - carregamento e validação de scripts;
@@ -234,7 +246,8 @@ Só `completed` e `dispatched` contam como sucesso.
 - detector visual com um modelo real do cliente Kain;
 - captura de janela no Windows, implementada mas não executada;
 - combate, áreas ocupadas, recuperação e coordenação de grupo;
-- execução das políticas configuradas (cura, buff, ataque, busca de alvo, drop): o editor salva, mas nenhum motor as executa;
+- execução das políticas configuradas (cura, buff, ataque, busca de alvo, drop): o `RuleEngine` decide, mas nenhuma decisão vira intenção;
+- qualquer fonte que cumpra o contrato de observação mínima: nenhuma cumpre hoje;
 - GUI aberta em Windows real por uma pessoa: a CI só testa offscreen;
 - depuração passo a passo, breakpoints e várias abas de arquivo no editor.
 

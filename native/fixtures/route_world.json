@@ -1,0 +1,7 @@
+{
+  "_comment": "Mundo SIMULADO para route_walker: parte do no 1 de route_demo.json, 60 unidades/ciclo; janela de missao no ciclo 12, fecha no 15.",
+  "self": {"position": [1000, 2000, -3100], "speed": 60},
+  "facts_at": {"12": {"quest_dialog": true}, "15": {"quest_dialog": false}},
+  "capabilities": ["move_to"],
+  "ticks": 300
+}

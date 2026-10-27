@@ -70,6 +70,9 @@ class VisualAdapter:
             dialog = observed(det.status is DetectionStatus.DETECTED, src, det.confidence, note or det.reason)
         return GameState(tick=self._tick, quest_dialog=dialog)
 
+    def observes(self) -> frozenset[str]:
+        return frozenset({"quest_dialog"})
+
     def capabilities(self) -> frozenset[ActionKind]:
         return frozenset()
 

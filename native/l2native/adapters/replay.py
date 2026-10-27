@@ -112,6 +112,9 @@ class ReplayAdapter:
                 raise AdapterError(f"linha {line_number}: {exc}") from exc
         raise SourceExhausted("fim do arquivo de replay")
 
+    def observes(self) -> Optional[frozenset[str]]:
+        return None  # depende do arquivo gravado; a prontidao e medida pelos dados
+
     def capabilities(self) -> frozenset[ActionKind]:
         return frozenset()
 

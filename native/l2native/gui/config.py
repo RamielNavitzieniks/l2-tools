@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 
 from ..actions import ActionKind, CapabilityStatus, capability_status
 from ..model import GameState
-from ..profile import SECTIONS, Profile, Section, Setting
+from ..profile import SECTIONS, Profile, Section, Setting, SkillEntry
 from ..rules import Condition, ConditionField, FieldType, FilterRule, Operator, Rule, RuleKind, TargetKind, ordered
 
 
@@ -96,8 +96,6 @@ class RuleDialog(QDialog):
         self.delay.setRange(0, 3_600_000)
         self.interval = QSpinBox()
         self.interval.setRange(0, 3_600_000)
-        self.game_id = QLineEdit()
-        self.game_id.setPlaceholderText("somente se confirmado no cliente")
         self.enabled = QCheckBox("Ativa")
         self.enabled.setChecked(True)
         self.conditions: list[Condition] = []
@@ -118,7 +116,7 @@ class RuleDialog(QDialog):
         form = QFormLayout()
         for label, w in (("Tipo", self.kind), ("Nome", self.name), ("Alvo", self.target),
                          ("Prioridade (0-100)", self.priority), ("Atraso (ms)", self.delay),
-                         ("Intervalo (ms)", self.interval), ("ID no jogo", self.game_id), ("", self.enabled)):
+                         ("Intervalo (ms)", self.interval), ("", self.enabled)):
             form.addRow(label, w)
         crow = QHBoxLayout()
         for w in (self.c_field, self.c_op, self.c_value, add_c, del_c):
@@ -128,6 +126,7 @@ class RuleDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         layout.addLayout(form)
+        layout.addWidget(QLabel("O ID no jogo vem do Catalogo de habilidades, pelo nome (perfil v2)."))
         layout.addWidget(QLabel("Condicoes (todas precisam ser verdadeiras; desconhecida bloqueia):"))
         layout.addWidget(self.cond_list)
         layout.addLayout(crow)
@@ -142,7 +141,6 @@ class RuleDialog(QDialog):
             self.priority.setValue(rule.priority)
             self.delay.setValue(rule.delay_ms)
             self.interval.setValue(rule.interval_ms)
-            self.game_id.setText("" if rule.game_id is None else str(rule.game_id))
             self.enabled.setChecked(rule.enabled)
             for c in rule.conditions:
                 self._append(c)
@@ -180,10 +178,9 @@ class RuleDialog(QDialog):
             del self.conditions[row]
 
     def build(self) -> Rule:
-        gid = self.game_id.text().strip()
         return Rule(RuleKind(self.kind.currentText()), self.name.text(), TargetKind(self.target.currentText()),
                     self.priority.value(), self.delay.value(), self.interval.value(), self.enabled.isChecked(),
-                    int(gid) if gid else None, tuple(self.conditions))
+                    tuple(self.conditions))
 
     def accept(self) -> None:
         try:
@@ -195,13 +192,14 @@ class RuleDialog(QDialog):
 
 
 class RuleTable(QWidget):
-    COLUMNS = ("Ativa", "Tipo", "Nome", "Alvo", "Prior.", "Atraso", "Interv.", "ID", "Condicoes", "Agora")
+    COLUMNS = ("Ativa", "Tipo", "Nome", "Alvo", "Prior.", "Atraso", "Interv.", "ID (catalogo)", "Condicoes", "Agora")
 
     def __init__(self, rules: list[Rule], state_provider: Callable[[], Optional[GameState]],
-                 parent: Optional[QWidget] = None) -> None:
+                 id_text: Callable[[Rule], str] = lambda rule: "", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.rules = list(rules)
         self.state_provider = state_provider
+        self.id_text = id_text
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -230,7 +228,7 @@ class RuleTable(QWidget):
                 now = {True: "verdadeira", False: "falsa", None: "desconhecida"}[rule.evaluate(state)]
             cells = ["sim" if rule.enabled else "nao", rule.kind.value, rule.name, rule.target.value,
                      str(rule.priority), str(rule.delay_ms), str(rule.interval_ms),
-                     "" if rule.game_id is None else str(rule.game_id),
+                     self.id_text(rule),
                      " E ".join(c.describe() for c in rule.conditions) or "(sempre)", now]
             for c, text in enumerate(cells):
                 self.table.setItem(r, c, QTableWidgetItem(text))
@@ -326,6 +324,79 @@ class FilterTable(QWidget):
             self.refresh()
 
 
+class SkillTable(QWidget):
+    """Catalogo de habilidades/itens do perfil: unica fonte de IDs (registro 022).
+    'Confirmado' so quando o ID foi visto no proprio cliente; nada e consultado."""
+    COLUMNS = ("Nome", "ID", "Confirmado", "Nota")
+
+    def __init__(self, skills: list[SkillEntry], on_change: Callable[[], None] = lambda: None,
+                 parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.skills = list(skills)
+        self.on_change = on_change
+        self.table = QTableWidget(0, len(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("nome (igual ao da regra)")
+        self.game_id = QLineEdit()
+        self.game_id.setPlaceholderText("ID")
+        self.confirmed = QCheckBox("Confirmado no cliente")
+        self.note = QLineEdit()
+        self.note.setPlaceholderText("nota (onde foi confirmado)")
+        self.error = QLabel()
+        self.error.setStyleSheet("color: #c62828")
+        add = QPushButton("Adicionar/atualizar")
+        add.clicked.connect(self._add_from_fields)
+        rem = QPushButton("Remover")
+        rem.clicked.connect(self._remove)
+        row = QHBoxLayout()
+        for w in (self.name, self.game_id, self.confirmed, self.note, add, rem):
+            row.addWidget(w)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.table)
+        layout.addLayout(row)
+        layout.addWidget(self.error)
+        self.refresh()
+
+    def refresh(self) -> None:
+        self.table.setRowCount(len(self.skills))
+        for r, s in enumerate(self.skills):
+            cells = (s.name, "" if s.game_id is None else str(s.game_id), "sim" if s.confirmed else "nao", s.note)
+            for c, text in enumerate(cells):
+                self.table.setItem(r, c, QTableWidgetItem(text))
+        self.on_change()
+
+    def put(self, entry: SkillEntry) -> None:
+        """Adiciona ou substitui (mesmo nome, sem diferenciar maiusculas)."""
+        self.skills = [s for s in self.skills if s.name.casefold() != entry.name.casefold()] + [entry]
+        self.refresh()
+
+    def lookup(self, name: str) -> Optional[SkillEntry]:
+        return next((s for s in self.skills if s.name.casefold() == name.casefold()), None)
+
+    def _add_from_fields(self) -> None:
+        try:
+            gid = self.game_id.text().strip()
+            self.put(SkillEntry(self.name.text().strip(), int(gid) if gid else None,
+                                self.confirmed.isChecked(), self.note.text().strip()))
+            self.error.setText("")
+        except ValueError as exc:
+            self.error.setText(str(exc))
+
+    def _remove(self) -> None:
+        r = self.table.currentRow()
+        if r >= 0:
+            del self.skills[r]
+            self.refresh()
+
+
+SKILLS_PAGE = "_habilidades"
+
+
 # --- dialogo -------------------------------------------------------------------------
 class ConfigDialog(QDialog):
     def __init__(self, profile: Profile, adapter_name: Optional[str], capabilities: frozenset[ActionKind],
@@ -339,6 +410,7 @@ class ConfigDialog(QDialog):
         self.fields: dict[str, dict[str, SettingField]] = {}
         self.rule_tables: dict[str, RuleTable] = {}
         self.filter_tables: dict[str, FilterTable] = {}
+        self.skill_table = SkillTable(self.profile.skills, self._refresh_rule_ids)
 
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
@@ -351,6 +423,11 @@ class ConfigDialog(QDialog):
             (items[sec.parent].addChild(item) if sec.parent else self.tree.addTopLevelItem(item))
             items[sec.key] = item
             self.page_index[sec.key] = self.pages.addWidget(self._page(sec, adapter_name, capabilities, state_provider))
+        item = QTreeWidgetItem(["Catalogo de habilidades"])
+        item.setData(0, Qt.ItemDataRole.UserRole, SKILLS_PAGE)
+        self.tree.addTopLevelItem(item)
+        items[SKILLS_PAGE] = item
+        self.page_index[SKILLS_PAGE] = self.pages.addWidget(self._skills_page())
         self.tree.expandAll()
         self.tree.currentItemChanged.connect(
             lambda cur, _: cur and self.pages.setCurrentIndex(self.page_index[cur.data(0, Qt.ItemDataRole.UserRole)]))
@@ -362,6 +439,8 @@ class ConfigDialog(QDialog):
         self.error = QLabel()
         self.error.setStyleSheet("color: #c62828")
         self.error.setWordWrap(True)
+        self.info = QLabel(self._migration_text(profile))
+        self.info.setWordWrap(True)
         top = QHBoxLayout()
         top.addWidget(QLabel("Perfil:"))
         top.addWidget(self.name)
@@ -381,8 +460,40 @@ class ConfigDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addLayout(top)
         layout.addWidget(split, 1)
+        layout.addWidget(self.info)
         layout.addWidget(self.error)
         layout.addWidget(buttons)
+
+    @staticmethod
+    def _migration_text(profile: Profile) -> str:
+        if not profile.migrated:
+            return ""
+        return ("Perfil migrado ao carregar (" + "; ".join(profile.migrated) +
+                "). Salve para gravar no formato atual.")
+
+    def id_text(self, rule: Rule) -> str:
+        entry = self.skill_table.lookup(rule.name)
+        if entry is None:
+            return "nao catalogada"
+        if not entry.confirmed:
+            return f"{entry.game_id or '-'} (nao confirmado)"
+        return str(entry.game_id)
+
+    def _refresh_rule_ids(self) -> None:
+        for t in getattr(self, "rule_tables", {}).values():
+            t.refresh()
+
+    def _skills_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(QLabel("<h3>Catalogo de habilidades</h3>"))
+        note = QLabel("Fonte unica dos IDs usados pelas regras, casados pelo nome. Regra sem entrada "
+                      "confirmada nunca fica pronta. Preencha apenas com IDs vistos no proprio cliente; "
+                      "nada e baixado nem copiado de ferramentas de terceiros.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        layout.addWidget(self.skill_table, 1)
+        return page
 
     def _page(self, sec: Section, adapter: Optional[str], caps: frozenset[ActionKind],
               state_provider: Callable[[], Optional[GameState]]) -> QWidget:
@@ -406,7 +517,7 @@ class ConfigDialog(QDialog):
                 form.addRow(s.label + (" 🔒" if s.locked else ""), f.widget)
             layout.addLayout(form)
         if sec.rules:
-            t = RuleTable(self.profile.rules[sec.key], state_provider)
+            t = RuleTable(self.profile.rules[sec.key], state_provider, self.id_text)
             self.rule_tables[sec.key] = t
             layout.addWidget(t, 1)
         if sec.filter_actions:
@@ -428,6 +539,7 @@ class ConfigDialog(QDialog):
             p.set_rules(sec_key, t.rules)
         for sec_key, t in self.filter_tables.items():
             p.set_filters(sec_key, t.filters)
+        p.set_skills(self.skill_table.skills)
         return p
 
     def changes(self) -> list[str]:
@@ -467,6 +579,9 @@ class ConfigDialog(QDialog):
     def replace_profile(self, imported: Profile) -> None:
         """Recarrega todos os campos com o perfil importado (alteracoes visiveis em 'Ver alteracoes')."""
         self.profile = imported.copy()
+        self.info.setText(self._migration_text(imported))
+        self.skill_table.skills = list(imported.skills)
+        self.skill_table.refresh()
         self.name.setText(imported.name)
         self.character.setText(imported.character)
         for sec_key, fields in self.fields.items():

@@ -1,5 +1,6 @@
-"""Mapa esquematico XY: marcadores, trajetoria, destino pedido e zona.
-Sem geodata, textura ou mapa raster; o rotulo deixa isso explicito."""
+"""Mapa esquematico XY: marcadores, trajetoria, destino pedido, zona e rota.
+Sem geodata, textura ou mapa raster; o rotulo deixa isso explicito.
+Cada elemento e uma camada que o operador liga/desliga (registro 022)."""
 from __future__ import annotations
 
 from typing import Optional
@@ -10,8 +11,11 @@ from PySide6.QtWidgets import QMenu, QWidget
 
 from ..mapping import MapTransform
 from ..model import GameState, Position
+from ..routes import RouteGraph
 
 MAX_TRAIL = 2000
+LAYERS = (("grade", "Grade"), ("trilha", "Trilha"), ("entidades", "Entidades"), ("zona", "Zona"),
+          ("rota", "Rota"), ("caminho", "Menor caminho"))
 
 
 class MapView(QWidget):
@@ -32,6 +36,10 @@ class MapView(QWidget):
         self._press = QPointF()
         self._auto_fit = True
         self.hover_text = ""
+        self.layers = {key: True for key, _ in LAYERS}
+        self.route: Optional[RouteGraph] = None
+        self.route_path: list[int] = []
+        self.route_cursor: Optional[int] = None   # ultimo no adicionado no modo de edicao
 
     # --- dados ----------------------------------------------------------------
     def reset(self) -> None:
@@ -40,6 +48,17 @@ class MapView(QWidget):
 
     def set_zone(self, center: Optional[Position], radius: float) -> None:
         self.zone = (center, radius) if center else None
+        self.update()
+
+    def set_layer(self, key: str, visible: bool) -> None:
+        if key not in self.layers:
+            raise KeyError(key)
+        self.layers[key] = visible
+        self.update()
+
+    def set_route(self, route: Optional[RouteGraph], path: Optional[list[int]] = None,
+                  cursor: Optional[int] = None) -> None:
+        self.route, self.route_path, self.route_cursor = route, list(path or []), cursor
         self.update()
 
     def set_pending_target(self, p: Optional[Position]) -> None:
@@ -66,6 +85,8 @@ class MapView(QWidget):
         if self.zone:
             c, r = self.zone
             pts += [Position(c.x - r, c.y - r, c.z), Position(c.x + r, c.y + r, c.z)]
+        if self.route:
+            pts += list(self.route.nodes.values())
         return pts
 
     def fit(self) -> None:
@@ -142,25 +163,43 @@ class MapView(QWidget):
         step = t.grid_step()
         x0, y0 = t.to_world(0, 0)
         x1, y1 = t.to_world(self.width(), self.height())
-        grid = QPen(QColor(128, 128, 128, 50))
-        painter.setPen(grid)
-        gx = (x0 // step) * step
-        while gx <= x1:
-            vx = t.to_view(gx, 0)[0]
-            painter.drawLine(QPointF(vx, 0), QPointF(vx, self.height()))
-            gx += step
-        gy = (y0 // step) * step
-        while gy <= y1:
-            vy = t.to_view(0, gy)[1]
-            painter.drawLine(QPointF(0, vy), QPointF(self.width(), vy))
-            gy += step
+        if self.layers["grade"]:
+            painter.setPen(QPen(QColor(128, 128, 128, 50)))
+            gx = (x0 // step) * step
+            while gx <= x1:
+                vx = t.to_view(gx, 0)[0]
+                painter.drawLine(QPointF(vx, 0), QPointF(vx, self.height()))
+                gx += step
+            gy = (y0 // step) * step
+            while gy <= y1:
+                vy = t.to_view(0, gy)[1]
+                painter.drawLine(QPointF(0, vy), QPointF(self.width(), vy))
+                gy += step
 
-        if self.zone:
+        if self.route and self.layers["rota"]:
+            painter.setPen(QPen(QColor("#8d6e63"), 1.2))
+            for edge in self.route.edges:
+                a, b = tuple(edge)
+                painter.drawLine(self._v(self.route.nodes[a]), self._v(self.route.nodes[b]))
+            for nid, p in self.route.nodes.items():
+                v = self._v(p)
+                painter.setBrush(QColor("#ffb300" if nid == self.route_cursor else "#8d6e63"))
+                painter.drawEllipse(v, 3.5, 3.5)
+                painter.drawText(v + QPointF(5, 12), str(nid))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self.route and self.layers["caminho"] and len(self.route_path) > 1:
+            path = QPainterPath(self._v(self.route.nodes[self.route_path[0]]))
+            for nid in self.route_path[1:]:
+                path.lineTo(self._v(self.route.nodes[nid]))
+            painter.setPen(QPen(QColor("#00897b"), 3))
+            painter.drawPath(path)
+
+        if self.zone and self.layers["zona"]:
             c, r = self.zone
             painter.setPen(QPen(QColor("#ef6c00"), 1.5, Qt.PenStyle.DashLine))
             painter.drawEllipse(self._v(c), r * t.scale, r * t.scale)
 
-        if len(self.trail) > 1:
+        if len(self.trail) > 1 and self.layers["trilha"]:
             path = QPainterPath(self._v(self.trail[0]))
             for p in self.trail[1:]:
                 path.lineTo(self._v(p))
@@ -170,7 +209,7 @@ class MapView(QWidget):
         st = self.state
         if st:
             for fld, color in ((st.npcs, "#e53935"), (st.characters, "#7e57c2")):
-                if not fld.known:
+                if not fld.known or not self.layers["entidades"]:
                     continue
                 for e in fld.value:
                     if not e.position.known:

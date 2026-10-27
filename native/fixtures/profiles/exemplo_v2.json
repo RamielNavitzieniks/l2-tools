@@ -1,0 +1,184 @@
+{
+  "_comment": "Perfil SINTETICO (v2) para testes: nomes e IDs ficticios, nada copiado de ferramentas de terceiros.",
+  "format": "l2tools-profile/2",
+  "name": "exemplo-sintetico",
+  "character": "Seguidora",
+  "values": {
+    "geral": {
+      "tick_interval_ms": 200,
+      "max_move_distance": 5000,
+      "max_script_errors": 1,
+      "autostart": false
+    },
+    "cura": {},
+    "cura.relaxar": {
+      "sit_hp_below": 35,
+      "sit_mp_below": 25,
+      "stand_hp_above": 95,
+      "stand_mp_above": 95,
+      "idle_without_target_s": 0,
+      "rest_point": null
+    },
+    "cura.morte": {
+      "wait_respawn_s": 0,
+      "wait_party": false,
+      "fallback": "parar",
+      "pause_after_res_s": 10
+    },
+    "buff": {},
+    "grupo_cura": {
+      "radius": 900,
+      "outside_party": false
+    },
+    "grupo": {
+      "accept_invites": "nunca",
+      "leader": "Sarynne",
+      "follow_leader": true,
+      "follow_distance": 300,
+      "assist_leader": false,
+      "quest_dialogs": "manual"
+    },
+    "ataque": {
+      "attack_range": 600,
+      "aggressive_limit": 3
+    },
+    "alvo": {
+      "avoid_fighting_others": true,
+      "avoid_near_players": true,
+      "players_radius": 700,
+      "hp_unchanged_s": 10,
+      "max_level_diff": 10
+    },
+    "alvo.filtro": {},
+    "zona": {
+      "mode": "centro_raio",
+      "center": [
+        1400.0,
+        2200.0,
+        -3100.0
+      ],
+      "radius": 1200,
+      "z_min": -20000,
+      "z_max": 20000,
+      "return_to_center": true
+    },
+    "rota": {
+      "route_file": "fixtures/route_demo.json",
+      "loop": true,
+      "tolerance": 60
+    },
+    "drop": {
+      "radius": 300,
+      "z_limit": 200,
+      "only_mine": true,
+      "inside_zone": true,
+      "timeout_s": 5
+    },
+    "drop.filtro": {}
+  },
+  "rules": {
+    "cura": [
+      {
+        "kind": "skill",
+        "name": "Cura Leve",
+        "target": "self",
+        "priority": 90,
+        "delay_ms": 0,
+        "interval_ms": 3000,
+        "enabled": true,
+        "conditions": [
+          {
+            "field": "hp_pct",
+            "op": "<",
+            "value": 50
+          }
+        ]
+      }
+    ],
+    "buff": [],
+    "grupo_cura": [],
+    "ataque": [
+      {
+        "kind": "skill",
+        "name": "Golpe Forte",
+        "target": "target",
+        "priority": 80,
+        "delay_ms": 0,
+        "interval_ms": 5000,
+        "enabled": true,
+        "conditions": [
+          {
+            "field": "in_combat",
+            "op": "==",
+            "value": true
+          },
+          {
+            "field": "has_target",
+            "op": "==",
+            "value": true
+          }
+        ]
+      },
+      {
+        "kind": "skill",
+        "name": "Golpe Basico",
+        "target": "target",
+        "priority": 40,
+        "delay_ms": 0,
+        "interval_ms": 0,
+        "enabled": true,
+        "conditions": [
+          {
+            "field": "in_combat",
+            "op": "==",
+            "value": true
+          }
+        ]
+      }
+    ]
+  },
+  "filters": {
+    "alvo.filtro": [
+      {
+        "action": "ignorar",
+        "name": "Guarda",
+        "game_id": null,
+        "priority": 90
+      },
+      {
+        "action": "atacar",
+        "name": "Lobo",
+        "game_id": null,
+        "priority": 50
+      }
+    ],
+    "drop.filtro": [
+      {
+        "action": "coletar",
+        "name": "Adena",
+        "game_id": null,
+        "priority": 60
+      }
+    ]
+  },
+  "skills": [
+    {
+      "name": "Cura Leve",
+      "game_id": 900001,
+      "confirmed": true,
+      "note": "ID ficticio de teste"
+    },
+    {
+      "name": "Golpe Forte",
+      "game_id": 900002,
+      "confirmed": true,
+      "note": "ID ficticio de teste"
+    },
+    {
+      "name": "Golpe Basico",
+      "game_id": null,
+      "confirmed": false,
+      "note": "ainda nao confirmado no cliente"
+    }
+  ]
+}

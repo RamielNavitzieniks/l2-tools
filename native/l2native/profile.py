@@ -6,6 +6,12 @@ com as capabilities do adaptador para mostrar Simulacao/Disponivel/Nao
 suportada/Desconhecida. Configurar uma secao NAO a torna funcional.
 
 Perfis nunca guardam credenciais: chaves com nomes sensiveis sao recusadas.
+
+Versoes do formato (campo "format"):
+- l2tools-profile/1: IDs de habilidade/item ficavam em cada regra (game_id).
+- l2tools-profile/2: catalogo de habilidades (`skills`) e a fonte unica de IDs;
+  regras referenciam entradas pelo nome. Nova secao "rota" (Path).
+Perfis antigos sao migrados ao carregar (`MIGRATIONS`); versoes futuras sao recusadas.
 """
 from __future__ import annotations
 
@@ -19,7 +25,9 @@ from .actions import ActionKind
 from .model import Position
 from .rules import FilterRule, Rule
 
-FORMAT = "l2tools-profile/1"
+FORMAT_PREFIX = "l2tools-profile/"
+SCHEMA_VERSION = 2
+FORMAT = f"{FORMAT_PREFIX}{SCHEMA_VERSION}"
 _SENSITIVE = re.compile(r"senha|password|passwd|token|secret|credential|login|account|conta|cookie", re.I)
 
 
@@ -145,6 +153,11 @@ SECTIONS: tuple[Section, ...] = (
         S("z_max", "Z maximo", "int", 20000, -30000, 30000),
         S("return_to_center", "Voltar ao centro sem alvo", "bool", True),
     ), needs=(ActionKind.MOVE_TO,), note="Desenhada no mapa XY quando o centro esta definido."),
+    Section("rota", "Rota", settings=(
+        S("route_file", "Arquivo de rota (l2tools-route/1)", "text", ""),
+        S("loop", "Repetir rota", "bool", False),
+        S("tolerance", "Tolerancia de chegada no no", "int", 50, 5, 1000),
+    ), needs=(ActionKind.MOVE_TO,), note="Grafo de rota proprio, desenhado no mapa. Executado so no Simulado (route_walker.py)."),
     Section("drop", "Drop", settings=(
         S("radius", "Raio de coleta", "int", 400, 0, 3000),
         S("z_limit", "Limite Z", "int", 200, 0, 2000),
@@ -156,6 +169,70 @@ SECTIONS: tuple[Section, ...] = (
 )
 del S
 SECTION_BY_KEY = {s.key: s for s in SECTIONS}
+
+
+@dataclass(frozen=True)
+class SkillEntry:
+    """Entrada do catalogo de habilidades/itens. `confirmed` so com ID visto no proprio cliente."""
+    name: str
+    game_id: Optional[int] = None
+    confirmed: bool = False
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("habilidade precisa de nome")
+        if self.game_id is not None and (isinstance(self.game_id, bool) or not isinstance(self.game_id, int)
+                                         or self.game_id <= 0):
+            raise ValueError(f"{self.name}: ID deve ser inteiro positivo")
+        if self.confirmed and self.game_id is None:
+            raise ValueError(f"{self.name}: nao pode ser confirmada sem ID")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "game_id": self.game_id, "confirmed": self.confirmed, "note": self.note}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "SkillEntry":
+        return cls(d["name"], d.get("game_id"), bool(d.get("confirmed", False)), d.get("note", ""))
+
+
+def _v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    """Move game_id das regras para o catalogo. Na v1 o campo so devia ser
+    preenchido com ID confirmado, entao a entrada migra como confirmada."""
+    skills: dict[str, dict[str, Any]] = {}
+    for sec_key, rules in (data.get("rules") or {}).items():
+        for rule in rules:
+            gid = rule.pop("game_id", None)
+            if gid is None:
+                continue
+            known = skills.get(rule["name"])
+            if known and known["game_id"] != gid:
+                raise ValueError(f"migracao v1->v2: '{rule['name']}' tem IDs diferentes ({known['game_id']} e {gid})")
+            skills[rule["name"]] = {"name": rule["name"], "game_id": gid, "confirmed": True,
+                                    "note": f"migrado da v1 ({sec_key})"}
+    data["skills"] = list(skills.values())
+    data["format"] = f"{FORMAT_PREFIX}2"
+    return data
+
+
+MIGRATIONS = {1: _v1_to_v2}  # versao de origem -> funcao que leva a versao seguinte
+
+
+def migrate(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Leva um perfil serializado ate SCHEMA_VERSION. Devolve (dados, passos aplicados)."""
+    fmt = str(data.get("format", ""))
+    if not fmt.startswith(FORMAT_PREFIX) or not fmt[len(FORMAT_PREFIX):].isdigit():
+        raise ValueError(f"formato de perfil nao reconhecido (esperado {FORMAT_PREFIX}N)")
+    version = int(fmt[len(FORMAT_PREFIX):])
+    if version > SCHEMA_VERSION:
+        raise ValueError(f"perfil da versao {version}, mais nova que a suportada ({SCHEMA_VERSION})")
+    applied = []
+    data = json.loads(json.dumps(data))  # copia profunda: nao altera o dicionario do chamador
+    while version < SCHEMA_VERSION:
+        data = MIGRATIONS[version](data)
+        applied.append(f"v{version}->v{version + 1}")
+        version += 1
+    return data, applied
 
 
 def _check_keys(obj: Any, path: str = "") -> None:
@@ -176,6 +253,8 @@ class Profile:
     values: dict[str, dict[str, Any]] = field(default_factory=dict)
     rules: dict[str, list[Rule]] = field(default_factory=dict)
     filters: dict[str, list[FilterRule]] = field(default_factory=dict)
+    skills: list[SkillEntry] = field(default_factory=list)
+    migrated: list[str] = field(default_factory=list, compare=False)  # passos aplicados ao carregar
 
     @classmethod
     def default(cls, name: str = "padrao", character: str = "") -> "Profile":
@@ -206,12 +285,30 @@ class Profile:
                 raise ValueError(f"acao de filtro invalida em {section}: {f.action}")
         self.filters[section] = list(filters)
 
+    def set_skills(self, skills: list[SkillEntry]) -> None:
+        names = [s.name.casefold() for s in skills]
+        if len(names) != len(set(names)):
+            raise ValueError("catalogo com nomes repetidos")
+        self.skills = list(skills)
+
+    def skill(self, name: str) -> Optional[SkillEntry]:
+        wanted = name.casefold()
+        return next((s for s in self.skills if s.name.casefold() == wanted), None)
+
+    def resolve_game_id(self, rule: Rule) -> Optional[int]:
+        """ID utilizavel por uma regra: somente de entrada CONFIRMADA do catalogo."""
+        entry = self.skill(rule.name)
+        return entry.game_id if entry and entry.confirmed else None
+
     def script_params(self) -> dict[str, Any]:
         """Parametros derivados do perfil para os scripts de exemplo."""
         g = self.values["grupo"]
         params: dict[str, Any] = {}
         if g["follow_leader"] and g["leader"].strip():
             params.update(leader=g["leader"].strip(), distance=g["follow_distance"])
+        r = self.values["rota"]
+        if r["route_file"].strip():
+            params.update(route=r["route_file"].strip(), loop=r["loop"], tolerance=r["tolerance"])
         return params
 
     def to_dict(self) -> dict[str, Any]:
@@ -220,14 +317,15 @@ class Profile:
             "values": self.values,
             "rules": {k: [r.to_dict() for r in v] for k, v in self.rules.items()},
             "filters": {k: [f.to_dict() for f in v] for k, v in self.filters.items()},
+            "skills": [s.to_dict() for s in self.skills],
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Profile":
-        if data.get("format") != FORMAT:
-            raise ValueError(f"formato de perfil nao reconhecido (esperado {FORMAT})")
         _check_keys(data)
+        data, applied = migrate(data)
         p = cls.default(str(data.get("name") or "importado"), str(data.get("character") or ""))
+        p.migrated = applied
         for sec_key, values in (data.get("values") or {}).items():
             if sec_key not in SECTION_BY_KEY:
                 raise ValueError(f"secao desconhecida: {sec_key}")
@@ -237,6 +335,7 @@ class Profile:
             p.set_rules(sec_key, [Rule.from_dict(r) for r in rules])
         for sec_key, filters in (data.get("filters") or {}).items():
             p.set_filters(sec_key, [FilterRule.from_dict(f) for f in filters])
+        p.set_skills([SkillEntry.from_dict(s) for s in data.get("skills", [])])
         return p
 
     def save(self, path: Path | str) -> None:
@@ -258,6 +357,8 @@ class Profile:
                 changes.append(f"{sec.title}: regras {len(self.rules[sec.key])} -> {len(other.rules[sec.key])}")
             if sec.filter_actions and self.filters[sec.key] != other.filters[sec.key]:
                 changes.append(f"{sec.title}: filtros {len(self.filters[sec.key])} -> {len(other.filters[sec.key])}")
+        if self.skills != other.skills:
+            changes.append(f"Catalogo de habilidades: {len(self.skills)} -> {len(other.skills)} entrada(s)")
         if (self.name, self.character) != (other.name, other.character):
             changes.append(f"Perfil: {self.name}/{self.character} -> {other.name}/{other.character}")
         return changes
